@@ -1,3 +1,12 @@
+---
+title: Codereview
+emoji: ⚡
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # 🔍 Code Review OpenEnv Environment
 
 A production-ready [OpenEnv](https://github.com/meta-pytorch/OpenEnv)-compliant environment that evaluates AI agents on their ability to perform **real-world code reviews** — detecting bugs, suggesting fixes, and explaining issues.
