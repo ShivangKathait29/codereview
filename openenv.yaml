@@ -1,0 +1,109 @@
+# ============================================================================
+# openenv.yaml — OpenEnv Environment Manifest
+#
+# This file declares the environment's identity, resource requirements,
+# and task metadata for the OpenEnv registry.
+# ============================================================================
+
+name: code_review_env
+version: "1.0.0"
+description: >
+  An OpenEnv-compliant environment that evaluates AI agents on their ability
+  to perform code reviews — detecting bugs, suggesting fixes, and explaining
+  issues across three deterministic tasks of increasing difficulty.
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+runtime:
+  language: python
+  version: "3.11"
+  framework: fastapi
+  entrypoint: "uvicorn server.app:app --host 0.0.0.0 --port 7860"
+  dockerfile: server/Dockerfile
+
+# ── Resource Constraints ─────────────────────────────────────────────────────
+resources:
+  cpu: 2
+  memory: "8GB"
+  timeout_minutes: 20
+
+# ── API Endpoints ────────────────────────────────────────────────────────────
+endpoints:
+  reset:
+    method: POST
+    path: /reset
+    description: "Start a new episode with a selected task."
+  step:
+    method: POST
+    path: /step
+    description: "Submit a code review for grading."
+  state:
+    method: GET
+    path: /state
+    description: "Get current episode metadata."
+  health:
+    method: GET
+    path: /health
+    description: "Liveness / readiness probe."
+
+# ── Data Models ──────────────────────────────────────────────────────────────
+models:
+  action:
+    type: CodeReviewAction
+    fields:
+      review:
+        type: string
+        description: "The agent's free-text code review."
+  observation:
+    type: CodeReviewObservation
+    fields:
+      code:
+        type: string
+        description: "The code snippet to review."
+      instructions:
+        type: string
+        description: "Review instructions for the task."
+      feedback:
+        type: string
+        description: "Grader feedback after step()."
+  state:
+    type: CodeReviewState
+    fields:
+      expected_issues:
+        type: list[string]
+        description: "Keywords the grader checks for."
+      difficulty:
+        type: string
+        description: "easy | medium | hard"
+
+# ── Tasks ────────────────────────────────────────────────────────────────────
+tasks:
+  - index: 0
+    name: "Silent Bug Detection"
+    difficulty: easy
+    description: "Detect a division-by-zero bug in a C++ average function."
+  - index: 1
+    name: "Performance Trap"
+    difficulty: medium
+    description: "Identify O(n²) complexity and suggest optimization."
+  - index: 2
+    name: "Deceptive Logic Bug"
+    difficulty: hard
+    description: "Find an off-by-one / out-of-bounds access in isSorted()."
+
+# ── Reward ───────────────────────────────────────────────────────────────────
+reward:
+  range: [0.0, 1.0]
+  formula: "issue_score + fix_score + explanation_score - penalties + bonus"
+  deterministic: true
+  grader_uses_llm: false
+
+# ── Metadata ─────────────────────────────────────────────────────────────────
+metadata:
+  author: "Code Review OpenEnv Team"
+  license: "MIT"
+  tags:
+    - code-review
+    - reinforcement-learning
+    - openenv
+    - evaluation
+    - hackathon
