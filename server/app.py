@@ -123,10 +123,11 @@ async def health() -> HealthResponse:
 
 if __name__ == "__main__":
     import uvicorn
+    import os
 
+    port = int(os.environ.get("PORT", 7860))
     uvicorn.run(
-        "server.app:app",
+        app,
         host="0.0.0.0",
-        port=7860,
-        reload=True,
+        port=port,
     )
