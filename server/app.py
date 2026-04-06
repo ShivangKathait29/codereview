@@ -117,6 +117,14 @@ async def health() -> HealthResponse:
     return HealthResponse()
 
 
+from fastapi.responses import RedirectResponse
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Redirect Hugging Face web traffic straight to the interactive API docs."""
+    return RedirectResponse(url="/docs")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Entrypoint (for `python server/app.py`)
 # ══════════════════════════════════════════════════════════════════════════════
