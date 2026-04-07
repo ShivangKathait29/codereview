@@ -281,7 +281,7 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     Grade a code review deterministically.
 
     Returns:
-        (reward, feedback, details_dict) where reward ∈ [0.0, 1.0]
+        (reward, feedback, info_dict) where reward ∈ [0.0, 1.0]
     """
     normalized = _normalize(review)
     breakdown: list[str] = []
@@ -331,14 +331,14 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     feedback = "\n".join(breakdown)
     
     # Heuristic score parsing for deterministic grading
-    details = {
+    info = {
         "issue": raw_score * 0.5,
         "fix": raw_score * 0.3,
         "explanation": raw_score * 0.2,
         "penalty": penalties,
         "total": reward
     }
-    return reward, feedback, details
+    return reward, feedback, info
 
 def is_malicious(review: str) -> bool:
     patterns = [
@@ -445,7 +445,7 @@ Evaluate:
         result = json.loads(content)
 
         # Enforce final_score = deterministic_score for security
-        det_reward, _, det_details = deterministic_grade_review(review, task)
+        det_reward, _, det_info = deterministic_grade_review(review, task)
         reward = det_reward
         
         breakdown = [
@@ -459,15 +459,15 @@ Evaluate:
             f"  Grader Feedback: {result.get('feedback', '')}"
         ]
         
-        details_dict = {
+        info_dict = {
             "issue": float(result.get("issue_score", 0.0)),
             "fix": float(result.get("fix_score", 0.0)),
             "explanation": float(result.get("explanation_score", 0.0)),
-            "penalty": det_details.get("penalty", 0.0),
+            "penalty": det_info.get("penalty", 0.0),
             "total": reward
         }
         
-        return reward, "\n".join(breakdown), details_dict
+        return reward, "\n".join(breakdown), info_dict
 
     except Exception as e:
         print(f"[Grader] LLM grading failed: {e}. Falling back to deterministic grader.")
@@ -552,7 +552,7 @@ class CodeReviewEnvironment:
             feedback=feedback,
         )
 
-        return StepResult(observation=observation, reward=reward, done=True, details=scores_dict)
+        return StepResult(observation=observation, reward=reward, done=True, info=details_dict)
 
     # ------------------------------------------------------------------
     # state

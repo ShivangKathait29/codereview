@@ -84,7 +84,7 @@ class StepResult(BaseModel):
         default=False,
         description="Whether the episode has ended.",
     )
-    details: Optional[dict[str, float]] = Field(
+    info: Optional[dict[str, float]] = Field(
         default=None,
         description="Detailed dictionary breakdown of sub-scores (issue, fix, explanation) provided natively by the grader.",
     )

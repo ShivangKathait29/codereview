@@ -198,7 +198,7 @@ def main() -> None:
                 "task_id": task_label,
                 "variant": state.variant_id,
                 "review": review,
-                "details": step_result.details,
+                "info": step_result.info,
                 "model": MODEL_NAME,
                 "timestamp": timestamp
             })
@@ -216,8 +216,8 @@ def main() -> None:
     with open("eval_log.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
-    valid_results = [r for r in results if "details" in r and r.get("details")]
-    avg_score = sum(r["details"].get("total", 0.0) for r in valid_results) / len(valid_results) if valid_results else 0.0
+    valid_results = [r for r in results if "info" in r and r.get("info")]
+    avg_score = sum(r["info"].get("total", 0.0) for r in valid_results) / len(valid_results) if valid_results else 0.0
     
     summary = {
         "num_tasks": len(results),
@@ -237,7 +237,7 @@ def main() -> None:
         if "error" in r:
             print(f"  ✗ {name}: ERROR ({r['error']})")
         else:
-            score = r["details"].get("total", 0.0)
+            score = r["info"].get("total", 0.0)
             status = "✓" if score >= 0.5 else "△" if score >= 0.3 else "✗"
             print(f"  {status} {name}: {score:.2f}")
 

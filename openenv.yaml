@@ -74,6 +74,15 @@ models:
       difficulty:
         type: string
         description: "easy | medium | hard"
+      task_index:
+        type: integer
+        description: "Index of the current task (0-2)."
+      variant_id:
+        type: string
+        description: "Title of the specific task variant."
+      done:
+        type: boolean
+        description: "Whether the episode is complete."
 
 # ── Tasks ────────────────────────────────────────────────────────────────────
 tasks:
