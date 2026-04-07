@@ -1,0 +1,14 @@
+[project]
+name = "code-review-env"
+version = "1.0.0"
+description = "Code Review OpenEnv Environment"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
