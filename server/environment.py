@@ -166,7 +166,7 @@ Explanation: {result.get("explanation_score", 0.0)}
 # FIXED ENVIRONMENT CLASS (WAS BROKEN / FLOATING)
 # ═════════════════════════════════════════════════════════════════════
 
-class CodeReviewEnv:
+class CodeReviewEnvironment:
     def __init__(self):
         self._state = CodeReviewState()
         self._current_task: Optional[Task] = None
