@@ -60,6 +60,10 @@ class CodeReviewState(BaseModel):
         default=0,
         description="Index of the current task (0–2).",
     )
+    variant_id: str = Field(
+        default="",
+        description="Title/ID of the specific randomized task variant.",
+    )
     done: bool = Field(
         default=False,
         description="Whether the current episode is complete.",
@@ -80,7 +84,7 @@ class StepResult(BaseModel):
         default=False,
         description="Whether the episode has ended.",
     )
-    scores: Optional[dict[str, float]] = Field(
+    details: Optional[dict[str, float]] = Field(
         default=None,
         description="Detailed dictionary breakdown of sub-scores (issue, fix, explanation) provided natively by the grader.",
     )

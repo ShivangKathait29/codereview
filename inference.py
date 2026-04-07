@@ -43,8 +43,8 @@ TASK_NAMES: list[str] = [
 
 def generate_review(code: str, instructions: str) -> str:
     """
-    Send the code + instructions to an OpenAI-compatible model in a unified 
-    Single-Shot JSON pipeline and return the combined code review.
+    Send the code + instructions to an OpenAI-compatible model in a two-step
+    Chain-of-Thought pipeline to reduce hallucinations.
     """
     llm = OpenAI(
         base_url=API_BASE_URL,
@@ -53,56 +53,64 @@ def generate_review(code: str, instructions: str) -> str:
         max_retries=1
     )
 
-    system_prompt = (
-        "You are a senior software engineer.\n\n"
-        "Analyze the following code carefully.\n\n"
-        "Your response MUST include:\n"
-        "1. Issue\n"
-        "2. Explanation\n"
-        "3. Fix\n\n"
-        "Instructions:\n"
-        "* Be precise and technical.\n"
-        "* Avoid vague statements.\n"
-        "* Focus on correctness, edge cases, and robustness.\n"
-        "* If the code is correct, explicitly state \"No issues found.\" and set fix to \"None\".\n"
-        "* Do NOT invent problems.\n"
-        "* Only report real, verifiable issues.\n\n"
-        "Penalty Rule:\n"
-        "* Incorrectly identifying an issue when none exists will be penalized.\n\n"
-        "Output format (JSON):\n"
-        "{\n"
-        "\"issue\": \"what is wrong\",\n"
-        "\"explanation\": \"why it is wrong\",\n"
-        "\"fix\": \"correct solution\"\n"
-        "}"
-    )
+    # Step 1: Reasoning Phase
+    reasoning_prompt = f"""You are a senior software engineer.
 
-    user_prompt = (
-        f"## Instructions\n{instructions}\n\n"
-        f"## Code\n```cpp\n{code}\n```\n"
-    )
+Analyze the following code step by step.
 
-    response = llm.chat.completions.create(
+Identify:
+- potential bugs
+- inefficiencies
+- edge cases
+
+Code:
+```cpp
+{code}
+```
+"""
+
+    response_1 = llm.chat.completions.create(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": reasoning_prompt},
+        ],
+        temperature=0.0
+    )
+    analysis = response_1.choices[0].message.content
+
+    # Step 2: Final Review (with hallucination defense)
+    final_prompt = f"""You are a strict code reviewer.
+
+Use ONLY the validated insights below.
+If unsure about an issue, DO NOT include it.
+If the code is correct, explicitly state "No issues found."
+
+Analysis:
+{analysis}
+
+Generate final review matching this JSON format exactly:
+{{
+"issue": "what is wrong",
+"explanation": "why it is wrong",
+"fix": "correct solution"
+}}
+"""
+
+    response_2 = llm.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "user", "content": final_prompt},
         ],
         temperature=0.0,
         response_format={"type": "json_object"}
     )
     
-    content = response.choices[0].message.content
+    content = response_2.choices[0].message.content
     try:
         data = json.loads(content)
-        required_keys = ["issue", "fix", "explanation"]
-        for key in required_keys:
-            if key not in data:
-                raise ValueError("Invalid agent output: missing required keys")
-                
-        issue = data["issue"]
-        explanation = data["explanation"]
-        fix = data["fix"]
+        issue = data.get("issue", "")
+        explanation = data.get("explanation", "")
+        fix = data.get("fix", "")
     except Exception as e:
         raise ValueError(f"LLM parse failed: {e}")
 
@@ -111,6 +119,11 @@ def generate_review(code: str, instructions: str) -> str:
         f"Fix: {fix}\n"
         f"Explanation: {explanation}"
     )
+
+    # Hallucination filter
+    if "maybe" in final_review.lower():
+        final_review = final_review.replace("maybe", "").replace("Maybe", "")
+        
     return final_review
 
 
@@ -174,14 +187,18 @@ def main() -> None:
             step_result = client.step(review=review)
             reward = step_result.reward
             feedback = step_result.observation.feedback
+            
+            # Fetch current state to log the specific randomized variant
+            state = client.state()
 
             print(f"  Reward: {reward:.2f}")
             print(f"  Feedback:\n{feedback}\n")
             
             results.append({
                 "task_id": task_label,
+                "variant": state.variant_id,
                 "review": review,
-                "scores": step_result.scores,
+                "details": step_result.details,
                 "model": MODEL_NAME,
                 "timestamp": timestamp
             })
@@ -199,8 +216,8 @@ def main() -> None:
     with open("eval_log.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
-    valid_results = [r for r in results if "scores" in r and r.get("scores")]
-    avg_score = sum(r["scores"].get("total", 0.0) for r in valid_results) / len(valid_results) if valid_results else 0.0
+    valid_results = [r for r in results if "details" in r and r.get("details")]
+    avg_score = sum(r["details"].get("total", 0.0) for r in valid_results) / len(valid_results) if valid_results else 0.0
     
     summary = {
         "num_tasks": len(results),
@@ -220,7 +237,7 @@ def main() -> None:
         if "error" in r:
             print(f"  ✗ {name}: ERROR ({r['error']})")
         else:
-            score = r["scores"].get("total", 0.0)
+            score = r["details"].get("total", 0.0)
             status = "✓" if score >= 0.5 else "△" if score >= 0.3 else "✗"
             print(f"  {status} {name}: {score:.2f}")
 

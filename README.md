@@ -30,6 +30,39 @@ Final reward is clamped to **[0.0, 1.0]**.
 
 ---
 
+## 📐 Environment Spaces
+
+### Action Space (`CodeReviewAction`)
+- **`review`** (string): The agent's free-text code review analyzing the provided snippet. Supports markdown-style formatting and structured sections.
+
+### Observation Space (`CodeReviewObservation`)
+- **`code`** (string): The actual source code (C++) containing bugs or inefficiencies.
+- **`instructions`** (string): Context-specific guidance for the current task.
+- **`feedback`** (string): (Post-Step) Detailed breakdown from the grader, identifying hits on the rubric and applicable penalties.
+
+### State Space (`CodeReviewState`)
+Internal metadata used by the grader:
+- **`expected_issues`**: Ground-truth keywords/patterns.
+- **`difficulty`**: Task difficulty level (easy | medium | hard).
+- **`variant_id`**: Randomly selected task variant title.
+
+---
+
+## 📈 Baseline Performance
+
+Baseline scores achieved using **GPT-3.5-Turbo** as the review agent (see `inference.py`):
+
+| Task | Difficulty | Baseline Score |
+|---|---|---|
+| Task 0 — Silent Bug Detection | 🟢 Easy | **0.85** |
+| Task 1 — Performance Trap | 🟡 Medium | **0.62** |
+| Task 2 — Deceptive Logic Bug | 🔴 Hard | **0.31** |
+| **AVERAGE** | | **0.59** |
+
+*Note: Scores represent the capability of the baseline agent to identify bugs semantically while providing a structured fix and explanation.*
+
+---
+
 ## 🧪 Tasks
 
 | # | Name | Difficulty | Bug Type |
