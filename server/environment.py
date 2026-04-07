@@ -332,10 +332,11 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     
     # Heuristic score parsing for deterministic grading
     info = {
-        "issue": raw_score * 0.5,
-        "fix": raw_score * 0.3,
-        "explanation": raw_score * 0.2,
-        "penalty": penalties,
+        "issue_score": raw_score * 0.5,
+        "fix_score": raw_score * 0.3,
+        "explanation_score": raw_score * 0.2,
+        "penalties": penalties,
+        "bonus": bonus,
         "total": reward
     }
     return reward, feedback, info
@@ -460,10 +461,11 @@ Evaluate:
         ]
         
         info_dict = {
-            "issue": float(result.get("issue_score", 0.0)),
-            "fix": float(result.get("fix_score", 0.0)),
-            "explanation": float(result.get("explanation_score", 0.0)),
-            "penalty": det_info.get("penalty", 0.0),
+            "issue_score": float(result.get("issue_score", 0.0)),
+            "fix_score": float(result.get("fix_score", 0.0)),
+            "explanation_score": float(result.get("explanation_score", 0.0)),
+            "penalties": det_info.get("penalties", 0.0),
+            "bonus": det_info.get("bonus", 0.0),
             "total": reward
         }
         

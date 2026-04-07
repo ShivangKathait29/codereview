@@ -238,6 +238,7 @@ def main() -> None:
             print(f"  ✗ {name}: ERROR ({r['error']})")
         else:
             score = r["info"].get("total", 0.0)
+            # Use total for summary logic, but the actual breakdown is now info['issue_score'] etc.
             status = "✓" if score >= 0.5 else "△" if score >= 0.3 else "✗"
             print(f"  {status} {name}: {score:.2f}")
 
