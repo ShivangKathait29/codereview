@@ -114,11 +114,11 @@ Generate final review matching this JSON format exactly:
     except Exception as e:
         raise ValueError(f"LLM parse failed: {e}")
 
-    final_review = (
-        f"Issue: {issue}\n"
-        f"Fix: {fix}\n"
-        f"Explanation: {explanation}"
-    )
+    final_review = json.dumps({
+    "issue": issue,
+    "fix": fix,
+    "explanation": explanation
+    })
 
     # Hallucination filter
     if "maybe" in final_review.lower():
