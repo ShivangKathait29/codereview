@@ -46,9 +46,24 @@ class ResetRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     """Response for GET /health."""
-    status: str = "ok"
+    status: str = "healthy"
     environment: str = "code_review"
     version: str = "1.0.0"
+
+
+class MetadataResponse(BaseModel):
+    """Response for GET /metadata."""
+    name: str = "code-review-env"
+    description: str = (
+        "An OpenEnv-compatible environment for evaluating AI code reviews."
+    )
+
+
+class SchemaResponse(BaseModel):
+    """Response for GET /schema."""
+    action: dict
+    observation: dict
+    state: dict
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -118,6 +133,35 @@ async def health() -> HealthResponse:
     return HealthResponse()
 
 
+@app.get("/metadata", response_model=MetadataResponse, summary="Environment metadata")
+async def metadata() -> MetadataResponse:
+    """Return environment metadata required by OpenEnv runtime validation."""
+    return MetadataResponse()
+
+
+@app.get("/schema", response_model=SchemaResponse, summary="Environment schemas")
+async def schema() -> SchemaResponse:
+    """Return JSON schemas for action, observation, and state."""
+    return SchemaResponse(
+        action=CodeReviewAction.model_json_schema(),
+        observation=CodeReviewObservation.model_json_schema(),
+        state=CodeReviewState.model_json_schema(),
+    )
+
+
+@app.post("/mcp", summary="MCP endpoint")
+async def mcp() -> dict:
+    """Return a minimal JSON-RPC payload for OpenEnv runtime validation."""
+    return {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {
+            "code": -32601,
+            "message": "Method not found",
+        },
+    }
+
+
 from fastapi.responses import RedirectResponse
 
 @app.get("/", include_in_schema=False)
@@ -130,9 +174,9 @@ async def root():
 # Entrypoint (for `python server/app.py`)
 # ══════════════════════════════════════════════════════════════════════════════
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the server from a console script entrypoint."""
     import uvicorn
-    import os
 
     port = int(os.environ.get("PORT", 7860))
     uvicorn.run(
@@ -140,3 +184,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
     )
+
+
+if __name__ == "__main__":
+    main()

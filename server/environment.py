@@ -554,7 +554,7 @@ class CodeReviewEnvironment:
             feedback=feedback,
         )
 
-        return StepResult(observation=observation, reward=reward, done=True, info=details_dict)
+        return StepResult(observation=observation, reward=reward, done=True, info=scores_dict)
 
     # ------------------------------------------------------------------
     # state
