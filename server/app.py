@@ -74,15 +74,16 @@ env = CodeReviewEnvironment()
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/reset", response_model=StepResult, summary="Reset the environment")
-async def reset(request: ResetRequest) -> StepResult:
+async def reset(request: Optional[ResetRequest] = None) -> StepResult:
     """
     Initialize a new episode.
 
     Selects a task by index and returns the initial observation
     containing the code snippet and review instructions.
     """
+    task_idx = request.task_index if request else 0
     try:
-        result = env.reset(task_index=request.task_index)
+        result = env.reset(task_index=task_idx)
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
