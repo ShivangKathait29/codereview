@@ -1,26 +1,50 @@
 [
   {
     "task_id": "Task 1 \u2014 Silent Bug Detection (Easy)",
-    "variant": "",
-    "review": "Issue: Division by zero error\nFix: Add a check for the count parameter before performing the division operation to avoid runtime errors.\nExplanation: If the `count` parameter is passed as 0, it will result in a division by zero error.",
-    "details": null,
+    "variant": "Silent Bug Detection (Variant A)",
+    "review": "{\"issue\": \"Division by zero\", \"fix\": \"Add a check to handle the case where `count` is 0 to avoid division by zero.\", \"explanation\": \"If the `count` parameter is passed as 0, it will result in a division by zero error.\"}",
+    "info": {
+      "issue_score": 0.5,
+      "fix_score": 0.3,
+      "explanation_score": 0.0,
+      "penalties": 0.0,
+      "bonus": 0.0,
+      "total": 0.8
+    },
+    "reward": 0.8,
     "model": "openai/gpt-3.5-turbo",
-    "timestamp": "2026-04-07T10:54:47.637706"
+    "timestamp": "2026-04-08T22:58:00.928873"
   },
   {
     "task_id": "Task 2 \u2014 Performance Trap (Medium)",
-    "variant": "",
-    "review": "Issue: Potential bug\nFix: Add `#include <vector>` at the beginning of the code.\nExplanation: The code is missing the `#include <vector>` statement, so the `vector` type is not recognized.",
-    "details": null,
+    "variant": "Performance Trap (Variant B - Hidden nested logic)",
+    "review": "{\"issue\": \"Potential bug\", \"fix\": \"Add `#include <vector>` at the beginning of the code.\", \"explanation\": \"The code is missing the `#include <vector>` statement, so the `vector` type is not recognized.\"}",
+    "info": {
+      "issue_score": 0.0,
+      "fix_score": 0.0,
+      "explanation_score": 0.0,
+      "penalties": 0.0,
+      "bonus": 0.0,
+      "total": 0.0
+    },
+    "reward": 0.0,
     "model": "openai/gpt-3.5-turbo",
-    "timestamp": "2026-04-07T10:55:00.767012"
+    "timestamp": "2026-04-08T22:58:12.607987"
   },
   {
     "task_id": "Task 3 \u2014 Deceptive Logic Bug (Hard)",
-    "variant": "",
-    "review": "Issue: Potential bugs\nFix: Change the type of `total` to `long long` to ensure accurate calculation and prevent overflow.\nExplanation: The variable `total` is declared as an `int`, but the function is supposed to return a `long long`, leading to potential overflow issues.",
-    "details": null,
+    "variant": "Deceptive Logic Bug (Variant A)",
+    "review": "{\"issue\": \"Potential bug in loop condition\", \"fix\": \"Change the loop condition to i < arr.size() - 1\", \"explanation\": \"The loop condition should be changed to iterate until i < arr.size() - 1 to avoid accessing arr[i+1] when i is at the last index, which can lead to undefined behavior.\"}",
+    "info": {
+      "issue_score": 0.5,
+      "fix_score": 0.3,
+      "explanation_score": 0.0,
+      "penalties": 0.0,
+      "bonus": 0.0,
+      "total": 0.8
+    },
+    "reward": 0.8,
     "model": "openai/gpt-3.5-turbo",
-    "timestamp": "2026-04-07T10:55:32.743020"
+    "timestamp": "2026-04-08T22:58:22.620078"
   }
 ]
