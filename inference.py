@@ -39,6 +39,11 @@ TASK_NAMES: list[str] = [
     "Task 2 — Performance Trap (Medium)",
     "Task 3 — Deceptive Logic Bug (Hard)",
 ]
+TASK_LOG_NAMES: list[str] = [
+    "task1_easy",
+    "task2_medium",
+    "task3_hard",
+]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -56,8 +61,8 @@ def log_start(task: str, env: str, model: str) -> None:
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
     done_val = str(done).lower()
-    error_val = _one_line(error) if error else "null"
-    action_val = _one_line(action)
+    error_val = _one_line(error).replace(" ", "_") if error else "null"
+    action_val = _one_line(action).replace(" ", "_")
     print(
         f"[STEP] step={step} action={action_val} reward={reward:.2f} done={done_val} error={error_val}",
         flush=True,
@@ -209,12 +214,13 @@ def main() -> None:
 
     for task_idx in range(3):
         task_label = TASK_NAMES[task_idx]
+        task_log_name = TASK_LOG_NAMES[task_idx]
         rewards: list[float] = []
         steps_taken = 0
         score = 0.0
         success = False
 
-        log_start(task=task_label, env=BENCHMARK_NAME, model=MODEL_NAME)
+        log_start(task=task_log_name, env=BENCHMARK_NAME, model=MODEL_NAME)
 
         timestamp = datetime.datetime.now().isoformat()
 
