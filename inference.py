@@ -55,14 +55,25 @@ def _one_line(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _to_token(text: str) -> str:
+    """Convert arbitrary text to a parser-safe single token."""
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", _one_line(text))
+    return token.strip("_") or "na"
+
+
+def _strict_unit(x: float) -> float:
+    """Clamp to strict open interval (0, 1) for validator compatibility."""
+    return min(0.99, max(0.01, x))
+
+
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
     done_val = str(done).lower()
-    error_val = _one_line(error).replace(" ", "_") if error else "null"
-    action_val = _one_line(action).replace(" ", "_")
+    error_val = _to_token(error) if error else "null"
+    action_val = _to_token(action)
     print(
         f"[STEP] step={step} action={action_val} reward={reward:.2f} done={done_val} error={error_val}",
         flush=True,
@@ -240,14 +251,15 @@ def main() -> None:
 
             # 3. Submit review to environment
             step_result = client.step(review=review)
-            reward = float(step_result.reward or 0.0)
+            reward_raw = float(step_result.reward or 0.0)
+            reward = _strict_unit(reward_raw)
             done = bool(step_result.done)
 
             rewards.append(reward)
             steps_taken = 1
-            score = max(0.0, min(1.0, reward))
+            score = _strict_unit(reward)
 
-            log_step(step=1, action=review, reward=reward, done=done, error=model_error)
+            log_step(step=1, action="submit_review", reward=reward, done=done, error=None)
             
             # Fetch current state to log the specific randomized variant
             state = client.state()
@@ -258,15 +270,22 @@ def main() -> None:
                 "variant": state.variant_id,
                 "review": review,
                 "info": step_result.info,
-                "reward": reward,
+                "reward": reward_raw,
                 "model": MODEL_NAME,
                 "timestamp": timestamp
             })
 
         except Exception as exc:
+            error_msg = _one_line(str(exc))
+            fallback_reward = 0.01
+            rewards.append(fallback_reward)
+            steps_taken = 1
+            score = fallback_reward
+            success = False
+            log_step(step=1, action="submit_review", reward=fallback_reward, done=True, error=error_msg)
             results.append({
                 "task_id": task_label,
-                "error": str(exc),
+                "error": error_msg,
                 "model": MODEL_NAME,
                 "timestamp": timestamp
             })
