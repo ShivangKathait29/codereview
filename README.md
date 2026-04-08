@@ -5,6 +5,8 @@ colorFrom: blue
 colorTo: purple
 sdk: docker
 pinned: false
+tags:
+  - openenv
 ---
 
 # 🔍 Code Review OpenEnv Environment
@@ -201,7 +203,8 @@ python inference.py
 |---|---|---|
 | `API_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible API endpoint |
 | `MODEL_NAME` | `gpt-3.5-turbo` | Model identifier |
-| `HF_TOKEN` | `""` | API authentication token |
+| `HF_TOKEN` | _(no default)_ | Hugging Face / API authentication token |
+| `OPENAI_API_KEY` | _(no default)_ | Fallback API key if `HF_TOKEN` is not set |
 | `ENV_URL` | `http://localhost:7860` | Environment server URL |
 
 ---
