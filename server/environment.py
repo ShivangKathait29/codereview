@@ -323,7 +323,6 @@ def _is_no_issue_task(task: Task) -> bool:
         "safe",
         "already checked",
         "no division by zero",
-        "correct",
     ]
     expected = " ".join(_normalize(item) for item in task.expected_issues)
     return any(marker in expected for marker in no_issue_markers)
@@ -349,6 +348,9 @@ EXPECTED: dict[str, list[str]] = {
     ],
     "out-of-bounds access": [
         "out of bounds",
+        "index out of range",
+        "k exceeds array size",
+        "invalid k",
         "oob",
         "boundary error",
         "arr[i+1]",
@@ -367,6 +369,21 @@ EXPECTED: dict[str, list[str]] = {
         "already checked",
     ],
 }
+
+
+def _expected_display_issues(expected_issues: list[str]) -> list[str]:
+    """Normalize expected issue labels for judge-facing mismatch messaging."""
+    normalized = [_normalize(item) for item in expected_issues if str(item).strip()]
+    boundary_markers = ["out of bounds", "out-of-bounds", "boundary", "index", "arr[i+1]"]
+    if any(any(marker in issue for marker in boundary_markers) for issue in normalized):
+        return [
+            "out of bounds",
+            "index out of range",
+            "k exceeds array size",
+            "invalid k",
+            "boundary error",
+        ]
+    return list(expected_issues)
 
 
 def _expand_expected_issues(expected_issues: list[str]) -> list[str]:
@@ -447,6 +464,15 @@ def detect_hallucination(review_issue: str, expected_issues: list[str]) -> bool:
     return False
 
 
+def is_issue_correct(predicted: str, expected_list: list[str]) -> bool:
+    """Strict check: predicted issue must contain one expected issue signal."""
+    predicted_norm = _normalize(predicted)
+    for exp in _expand_expected_issues(expected_list):
+        if _normalize(exp) in predicted_norm:
+            return True
+    return False
+
+
 def is_fix_relevant(issue: str, fix: str) -> bool:
     """Check whether the proposed fix is relevant to the identified issue."""
     issue = issue.lower().strip()
@@ -510,6 +536,8 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     no_issue_task = _is_no_issue_task(task)
     hallucination = False
     adversarial_penalty = 0.0
+    mismatch_detected = False
+    mismatch_expected = _expected_display_issues(task.expected_issues)
 
     adversarial_issue, adversarial_failures = _detect_adversarial_issue_from_code(task.code)
 
@@ -519,10 +547,14 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     if detect_hallucination(issue_source, expected_for_hallucination):
         adversarial_miss = bool(adversarial_issue and adversarial_failures)
         miss_line = "\nPenalty: missed adversarially validated bug." if adversarial_miss else ""
+        expected_display = _expected_display_issues(expected_for_hallucination)
+        detected_issue = (issue_text or issue_source or "").strip()
         reward = _strict_unit(0.0)
         feedback = (
             f"Task: {task.title} ({task.difficulty})\n"
             "Hallucinated issue detected\n"
+            f"Mismatch detected: predicted issue '{detected_issue}' does not match expected issue type.\n"
+            f"Expected issue family: {', '.join(expected_display)}\n"
             "Issue Identification: 0.00/0.50\n"
             "Fix Quality: 0.00/0.30\n"
             "Explanation Quality: 0.00/0.20\n"
@@ -542,6 +574,9 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
             "total_score": 0.0,
             "total": 0.0,
             "adversarial_penalty": 0.2 if adversarial_miss else 0.0,
+            "mismatch_detected": True,
+            "detected_issue": detected_issue,
+            "expected_issues": expected_display,
         }
         return reward, feedback, info
 
@@ -565,19 +600,29 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
         )
         explanation_score = 0.2 if explanation_correct else 0.0
     else:
-        issue_correct = _matches_any(issue_source, issue_keywords)
+        expected_for_issue = list(task.expected_issues)
+        if adversarial_issue:
+            expected_for_issue.append(adversarial_issue)
+
+        issue_correct = is_issue_correct(issue_source, expected_for_issue)
         hallucination = not issue_correct
-        issue_score = 0.5 if issue_correct else 0.0
+        if not issue_correct:
+            # HARD RULE: mismatch means zero across all rubric components.
+            issue_score = 0.0
+            fix_score = 0.0
+            explanation_score = 0.0
+            mismatch_detected = True
+        else:
+            issue_score = 0.5
+            fix_relevant = is_fix_relevant(issue_source, fix_source)
+            fix_correct = fix_relevant and _matches_any(fix_source, fix_keywords)
+            fix_score = 0.3 if fix_correct else 0.0
 
-        fix_relevant = is_fix_relevant(issue_source, fix_source)
-        fix_correct = issue_correct and fix_relevant and _matches_any(fix_source, fix_keywords)
-        fix_score = 0.3 if fix_correct else 0.0
-
-        explanation_correct = issue_correct and (
-            _matches_any(explanation_source, explanation_keywords)
-            or _matches_any(explanation_source, task.expected_issues)
-        )
-        explanation_score = 0.2 if explanation_correct else 0.0
+            explanation_correct = (
+                _matches_any(explanation_source, explanation_keywords)
+                or _matches_any(explanation_source, task.expected_issues)
+            )
+            explanation_score = 0.2 if explanation_correct else 0.0
 
     adversarial_detected = False
     if adversarial_issue and adversarial_failures:
@@ -587,6 +632,9 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
             issue_score = 0.5
         else:
             issue_score = 0.0
+            fix_score = 0.0
+            explanation_score = 0.0
+            mismatch_detected = True
             adversarial_penalty = 0.2
 
     total_score = max(0.0, issue_score + fix_score + explanation_score - adversarial_penalty)
@@ -600,6 +648,10 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
     ]
     if hallucination:
         feedback_lines.append("Hallucination detected: mentioned issue does not match code/task.")
+    if mismatch_detected:
+        detected_issue = (issue_text or "(empty issue)").strip()
+        feedback_lines.append(f"Mismatch detected: predicted issue '{detected_issue}' does not match expected issue type.")
+        feedback_lines.append(f"Expected issue family: {', '.join(mismatch_expected)}")
     if (not no_issue_task) and issue_score > 0.0 and fix_score == 0.0:
         feedback_lines.append("Fix relevance check failed: fix does not directly address the identified issue.")
     if adversarial_issue and adversarial_failures:
@@ -620,6 +672,9 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
         "bonus": 0.0,
         "total_score": total_score,
         "total": reward,
+        "mismatch_detected": mismatch_detected,
+        "detected_issue": issue_text,
+        "expected_issues": mismatch_expected,
     }
     info["adversarial_penalty"] = adversarial_penalty
     info["issue"] = issue_score

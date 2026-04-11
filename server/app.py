@@ -504,6 +504,9 @@ No critical missed insight detected yet.
 
 👉 This shows:
 edge-case coverage is currently acceptable</pre>
+                    <pre id="mismatchDetectionText" style="margin-top: 10px;">🚨 Incorrect Issue Mapping
+
+No issue mismatch detected.</pre>
                     <details>
                         <summary>Show JSON Logs ▼</summary>
                         <pre id="jsonLogsText">{
@@ -573,6 +576,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const feedbackTextEl = document.getElementById("feedbackText");
         const groundTruthTextEl = document.getElementById("groundTruthText");
         const missedInsightTextEl = document.getElementById("missedInsightText");
+        const mismatchDetectionTextEl = document.getElementById("mismatchDetectionText");
         const hallucinationAlertEl = document.getElementById("hallucinationAlert");
         const halluBadgeEl = document.getElementById("halluBadge");
         const comparisonTextEl = document.getElementById("comparisonText");
@@ -774,6 +778,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             const whyWrong = String(gt.why_wrong || "-");
             const correctFix = String(gt.correct_fix || "-");
             const exampleFailure = String(gt.example_failure || "-");
+            const expectedIssues = Array.isArray(gt.expected_issues) ? gt.expected_issues.map((x) => String(x)) : [];
             return [
                 "🧠 Correct Analysis (Ground Truth)",
                 "",
@@ -788,6 +793,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 "",
                 "✔ Example Failure:",
                 exampleFailure,
+                "",
+                "✔ Expected Issues:",
+                expectedIssues.length > 0 ? expectedIssues.join(" | ") : "-",
             ].join("\n");
         };
 
@@ -801,6 +809,32 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 "",
                 "👉 This shows:",
                 implication,
+            ].join("\n");
+        };
+
+        const renderMismatchDetection = (mismatch) => {
+            const info = mismatch && typeof mismatch === "object" ? mismatch : {};
+            const detected = Boolean(info.detected);
+            if (!detected) {
+                return [
+                    "🚨 Incorrect Issue Mapping",
+                    "",
+                    "No issue mismatch detected.",
+                ].join("\n");
+            }
+
+            const detectedIssue = String(info.detected_issue || "-");
+            const expected = Array.isArray(info.expected)
+                ? info.expected.map((x) => String(x)).join(" / ")
+                : String(info.expected || "-");
+
+            return [
+                "🚨 Incorrect Issue Mapping",
+                "",
+                `Detected: ${detectedIssue} ❌`,
+                `Expected: ${expected} ✅`,
+                "",
+                "👉 Judges LOVE this.",
             ].join("\n");
         };
 
@@ -853,6 +887,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             const grader = data && data.grader_output ? data.grader_output : {};
             const missedInsight = data && data.missed_insight ? data.missed_insight : {};
             const groundTruth = data && data.ground_truth ? data.ground_truth : {};
+            const mismatch = data && data.mismatch_detection ? data.mismatch_detection : {};
             return {
                 type: "single-evaluation",
                 generated_at: new Date().toISOString(),
@@ -868,6 +903,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 penalty_applied: Number(grader.penalty_applied || 0),
                 missed_insight: String(missedInsight.text || "None"),
                 ground_truth_issue: String(groundTruth.issue || "-"),
+                mismatch_detected: Boolean(mismatch.detected || false),
             };
         };
 
@@ -901,6 +937,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 `Issue/Fix/Explanation: ${Number(scorecard.issue_score || 0).toFixed(2)} / ${Number(scorecard.fix_score || 0).toFixed(2)} / ${Number(scorecard.explanation_score || 0).toFixed(2)}`,
                 `Hallucination Detected: ${Boolean(scorecard.hallucination_detected) ? "Yes" : "No"}`,
                 `Penalty Applied: ${Number(scorecard.penalty_applied || 0).toFixed(2)}`,
+                `Mismatch Detected: ${Boolean(scorecard.mismatch_detected) ? "Yes" : "No"}`,
                 `Missed Insight: ${String(scorecard.missed_insight || "None")}`,
                 `Ground Truth Issue: ${String(scorecard.ground_truth_issue || "-")}`,
             ].join("\n");
@@ -930,6 +967,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             feedbackTextEl.textContent = grader.feedback || "No feedback returned.";
             groundTruthTextEl.textContent = renderGroundTruth(data.ground_truth || {});
             missedInsightTextEl.textContent = renderMissedInsight(data.missed_insight || {});
+            mismatchDetectionTextEl.textContent = renderMismatchDetection(data.mismatch_detection || grader.mismatch_detection || {});
 
             if (!fromCache) {
                 const classification = grader.error_classification || {};
@@ -970,6 +1008,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 variant: String(data.variant || ""),
                 ground_truth: data.ground_truth || {},
                 missed_insight: data.missed_insight || {},
+                mismatch_detection: data.mismatch_detection || grader.mismatch_detection || {},
                 source: fromCache ? "cached-fallback" : "live",
             }, null, 2);
 
@@ -1876,7 +1915,41 @@ def _match_task_by_code(task_index: int, code_input: str, fallback_task: Optiona
     for task in TASKS[max(0, min(task_index, len(TASKS) - 1))]:
         if _normalize_code(task.code) == target:
             return task
+    inferred = _infer_task_variant_by_heuristic(task_index, code_input)
+    if inferred is not None:
+        return inferred
     return fallback_task or TASKS[max(0, min(task_index, len(TASKS) - 1))][0]
+
+
+def _infer_task_variant_by_heuristic(task_index: int, code_input: str) -> Optional[Task]:
+    """Best-effort deterministic variant inference for custom snippets."""
+    idx = max(0, min(task_index, len(TASKS) - 1))
+    group = TASKS[idx]
+    code_lower = (code_input or "").lower()
+
+    if idx == 0:
+        if "count == 0" in code_lower or "if (count == 0)" in code_lower:
+            return group[2]
+        if "/" in code_input and "count" in code_lower:
+            return group[0]
+
+    if idx == 1:
+        if "vector<int> arr" in code_lower and "const vector<int>&" not in code_lower:
+            return group[2]
+        if "find(" in code_lower or "std::find" in code_lower:
+            return group[1]
+        if "nested" in code_lower or "for" in code_lower:
+            return group[0]
+
+    if idx == 2:
+        if any(token in code_lower for token in ["arr[i+1]", "out of bounds", "out-of-bounds", "boundary", "binary", "index", "invalid k", "k >=", "k < 0"]):
+            return group[0]
+        if "front()" in code_lower or "back()" in code_lower or "empty" in code_lower:
+            return group[1]
+        if "int total" in code_lower and "long long" in code_lower:
+            return group[2]
+
+    return None
 
 
 def _match_task_globally_by_code(code_input: str) -> Optional[tuple[int, Task]]:
@@ -1894,7 +1967,7 @@ def _is_hallucination_reference_code(code_input: str) -> bool:
     return _normalize_code(code_input) == _normalize_code(HALLUCINATION_SAFE_CODE)
 
 
-def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: str) -> dict[str, str]:
+def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: str) -> dict[str, object]:
     """Return judge-facing ground truth analysis after grading."""
     code_lower = (code_input or "").lower()
     expected_blob = " ".join(getattr(task, "expected_issues", []) or []).lower()
@@ -1905,6 +1978,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "Claiming a bug here is a false positive; the code is a direct return of a + b.",
             "correct_fix": "No fix needed.",
             "example_failure": "Input: add(2, 3)\\nOutput: 5 (already correct)",
+            "expected_issues": ["none"],
         }
 
     if "mx = 0" in code_lower or "int mx=0" in code_lower or (
@@ -1915,6 +1989,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "Fails for arrays with all negative numbers.",
             "correct_fix": "int mx = arr[0];",
             "example_failure": "Input: [-5, -2, -10]\\nOutput: 0 (wrong)\\nExpected: -2",
+            "expected_issues": ["negative-only array", "max initialization", "boundary error"],
         }
 
     if "/" in code_input and "count" in code_lower and "division" in expected_blob:
@@ -1923,6 +1998,26 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "The function can crash or return undefined behavior on zero denominator.",
             "correct_fix": "if (count == 0) return 0;  // or return error",
             "example_failure": "Input: total=10, count=0\\nOutput: crash/undefined\\nExpected: safe guard path",
+            "expected_issues": ["division by zero", "count == 0", "zero check"],
+        }
+
+    if (
+        ("binary" in code_lower or "mid" in code_lower or "k" in code_lower)
+        and ("[" in code_input or "size()" in code_lower or "length" in code_lower)
+        and ("boundary" in expected_blob or "out-of-bounds" in expected_blob or "index" in expected_blob)
+    ):
+        return {
+            "issue": "Boundary/index validation missing for k",
+            "why_wrong": "The implementation can access invalid index when k exceeds array size or is negative.",
+            "correct_fix": "Validate k bounds before indexing: if (k < 0 || k >= arr.size()) handle error.",
+            "example_failure": "Input: arr=[3,5,8], k=5\\nOutput: invalid index access\\nExpected: guarded boundary handling",
+            "expected_issues": [
+                "out of bounds",
+                "index out of range",
+                "k exceeds array size",
+                "invalid k",
+                "boundary error",
+            ],
         }
 
     if "arr[i+1]" in code_lower or "out-of-bounds" in expected_blob:
@@ -1931,6 +2026,13 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "At the last index, i + 1 is invalid and causes undefined behavior.",
             "correct_fix": "for (size_t i = 0; i + 1 < arr.size(); ++i) { ... }",
             "example_failure": "Input: [7]\\nOutput: invalid memory access\\nExpected: safe execution",
+            "expected_issues": [
+                "out of bounds",
+                "index out of range",
+                "k exceeds array size",
+                "invalid k",
+                "boundary error",
+            ],
         }
 
     if "vector<int> arr" in code_lower and "const vector<int>&" not in code_lower:
@@ -1939,6 +2041,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "Copies the whole array and increases time/memory overhead.",
             "correct_fix": "Use const vector<int>& arr in the function signature.",
             "example_failure": "Input: 1,000,000 elements\\nOutput: unnecessary copy cost\\nExpected: reference-based access",
+            "expected_issues": ["pass by value", "copy overhead", "const reference"],
         }
 
     if "arr.front()" in code_lower or "arr.back()" in code_lower:
@@ -1947,6 +2050,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "front()/back() on empty vectors is undefined behavior.",
             "correct_fix": "if (arr.empty()) return <safe default>;",
             "example_failure": "Input: []\\nOutput: undefined behavior\\nExpected: safe early return",
+            "expected_issues": ["empty array", "undefined behavior", "front/back on empty"],
         }
 
     if "int total = 0" in code_lower and "+=" in code_lower:
@@ -1955,6 +2059,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
             "why_wrong": "Large sums can exceed int limits and wrap around.",
             "correct_fix": "Use long long total = 0;",
             "example_failure": "Input: [1e9, 1e9, 1e9]\\nOutput: overflowed int\\nExpected: 3000000000",
+            "expected_issues": ["integer overflow", "total overflow", "return type mismatch"],
         }
 
     issue = "-"
@@ -1966,6 +2071,7 @@ def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: 
         "why_wrong": "The submitted review missed or partially described the expected issue.",
         "correct_fix": "Align fix directly with the detected root cause.",
         "example_failure": "Use an edge-case input that deterministically reproduces the bug.",
+        "expected_issues": list(getattr(task, "expected_issues", []) or []),
     }
 
 
@@ -2018,13 +2124,25 @@ def _score_standard_review(review: str, task: Task) -> dict[str, object]:
     """Score a review with deterministic standard-task rubric."""
     reward, feedback, info = deterministic_grade_review(review, task)
     total_score = float(info.get("total_score", info.get("total", reward)))
-    return {
+    numeric_info = {
         "issue_score": float(info.get("issue_score", 0.0)),
         "fix_score": float(info.get("fix_score", 0.0)),
         "explanation_score": float(info.get("explanation_score", 0.0)),
+        "penalties": float(info.get("penalties", 0.0)),
+        "bonus": float(info.get("bonus", 0.0)),
+    }
+    return {
+        "issue_score": numeric_info["issue_score"],
+        "fix_score": numeric_info["fix_score"],
+        "explanation_score": numeric_info["explanation_score"],
         "final_score": total_score,
         "feedback": feedback,
-        "reason_items": _build_reason_items({k: float(v) for k, v in info.items()}),
+        "reason_items": _build_reason_items(numeric_info),
+        "mismatch_detection": {
+            "detected": bool(info.get("mismatch_detected", False)),
+            "detected_issue": str(info.get("detected_issue", "")),
+            "expected": list(info.get("expected_issues", [])) if isinstance(info.get("expected_issues", []), list) else [],
+        },
     }
 
 
@@ -2540,6 +2658,11 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                 },
                 "ground_truth": ground_truth,
                 "missed_insight": missed_insight,
+                "mismatch_detection": {
+                    "detected": bool(hallucination_scores.get("hallucination_detected", False)),
+                    "detected_issue": fields["issue"],
+                    "expected": ["none"],
+                },
                 "grader_output": {
                     "issue_score": float(hallucination_scores["issue_score"]),
                     "fix_score": float(hallucination_scores["fix_score"]),
@@ -2611,6 +2734,7 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
             },
             "ground_truth": ground_truth,
             "missed_insight": missed_insight,
+            "mismatch_detection": standard_scores.get("mismatch_detection", {"detected": False, "detected_issue": "", "expected": []}),
             "grader_output": {
                 "issue_score": float(standard_scores.get("issue_score", 0.0)),
                 "fix_score": float(standard_scores.get("fix_score", 0.0)),
@@ -2620,6 +2744,7 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                 "hallucination_detected": False,
                 "penalty_applied": 0.0,
                 "reason_items": reason_items,
+                "mismatch_detection": standard_scores.get("mismatch_detection", {"detected": False, "detected_issue": "", "expected": []}),
                 "error_classification": error_classification,
                 "feedback": str(standard_scores.get("feedback", "No feedback returned.")),
             },
