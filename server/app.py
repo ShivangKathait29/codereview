@@ -972,17 +972,15 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             }
 
             if (reliabilityLow) {
-                const penaltyValue = Number(grader.penalty_applied || 0);
                 const alertLines = [];
                 if (hallucinationDetected) {
                     alertLines.push("🚨 False Issue Detected (Hallucination)");
                     alertLines.push("❌ False issue identified");
-                    alertLines.push(`Penalty applied: -${penaltyValue.toFixed(1)}`);
+                    alertLines.push("Penalty: Hallucinated issue (strict zero reward)");
                 }
                 if (!hallucinationDetected && mismatchDetected) {
                     alertLines.push("🚨 Issue Mapping Mismatch Detected");
                 }
-                alertLines.push("🔒 Reliability: LOW");
                 hallucinationAlertEl.textContent = alertLines.join("\n");
                 hallucinationAlertEl.classList.add("show");
             } else {
