@@ -30,6 +30,8 @@ The environment presents C++ code snippets containing intentional bugs or perfor
 
 Final reward is clamped to **[0.0, 1.0]**.
 
+For validator compatibility, task-level scores and total are emitted in the strict-open interval **(0.0, 1.0)**.
+
 ---
 
 ## 📐 Environment Spaces
@@ -75,6 +77,22 @@ Baseline scores achieved using **GPT-3.5-Turbo** as the review agent (see `infer
 
 ---
 
+## 🎬 Live Demo Features
+
+The root route (`/`) serves an interactive demo UI that includes:
+
+- Live evaluation pipeline (code input -> agent output -> grader output)
+- Step-wise reasoning trace and score explainability
+- Error Type Classification Dashboard
+- Hallucination detection mode (false-positive penalty)
+- Adversarial test generator with explicit reasons (`Why this test was generated`)
+- Model comparison leaderboard
+- Auto replay + downloadable replay report
+- One-click **Judge Demo Mode** sequence
+- Auto benchmark generation with summary table
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -82,14 +100,14 @@ code_review_env/
 ├── models.py              # Pydantic data models (Action, Observation, State)
 ├── client.py              # Typed HTTP client for the environment
 ├── inference.py           # Baseline inference script (OpenAI-compatible)
+├── Dockerfile             # Container configuration
 ├── openenv.yaml           # OpenEnv manifest
 ├── requirements.txt       # Python dependencies
 ├── README.md
 └── server/
     ├── __init__.py
     ├── environment.py     # Core environment logic + deterministic grader
-    ├── app.py             # FastAPI server (endpoints)
-    └── Dockerfile         # Container configuration
+  └── app.py             # FastAPI server + demo UI + benchmark endpoints
 ```
 
 ---
@@ -109,7 +127,11 @@ pip install -r requirements.txt
 uvicorn server.app:app --host 0.0.0.0 --port 7860 --reload
 ```
 
-The API is now live at `http://localhost:7860`. Swagger docs at `http://localhost:7860/docs`.
+The app is now live at `http://localhost:7860`.
+
+- Interactive demo UI: `http://localhost:7860/`
+- Swagger docs: `http://localhost:7860/docs`
+- API docs shortcut: `http://localhost:7860/api`
 
 ### 3. Test with cURL
 
@@ -146,7 +168,7 @@ print(f"Feedback:\n{result.observation.feedback}")
 
 ```bash
 # Build (from project root)
-docker build -t code-review-env -f server/Dockerfile .
+docker build -t code-review-env -f Dockerfile .
 
 # Run
 docker run -p 7860:7860 code-review-env
@@ -177,10 +199,20 @@ python inference.py
 
 | Endpoint | Method | Description |
 |---|---|---|
+| `/` | GET | Interactive live demo page |
+| `/api` | GET | Redirect shortcut to Swagger docs |
 | `/reset` | POST | Start a new episode (select task by index) |
 | `/step` | POST | Submit a review for grading |
 | `/state` | GET | Get current episode metadata |
 | `/health` | GET | Liveness probe |
+| `/metadata` | GET | OpenEnv metadata |
+| `/schema` | GET | Action/observation/state JSON schemas |
+| `/mcp` | POST | Minimal MCP-compatible JSON-RPC response |
+| `/demo/evaluate` | POST | End-to-end live evaluation pipeline |
+| `/demo/compare` | POST | Multi-model leaderboard on same scenario |
+| `/demo/adversarial` | POST | Adversarial test generation |
+| `/demo/benchmark-report` | GET | Benchmark report JSON (summary + scenario rows) |
+| `/demo/benchmark-table` | GET | Compact benchmark table payload |
 | `/docs` | GET | Interactive Swagger UI |
 
 ### POST `/reset`
@@ -194,6 +226,31 @@ python inference.py
 **Body**: `{"review": "Your code review text..."}`
 
 **Response**: `StepResult` with reward (0.0–1.0), feedback, and `done=true`.
+
+### GET `/demo/benchmark-report`
+
+Returns a deterministic benchmark report with:
+
+- `summary_rows` (ranked model metrics)
+- `scenario_rows` (per-scenario details)
+- `table` (render-ready benchmark table text)
+
+### GET `/demo/benchmark-table`
+
+Returns a compact benchmark payload suitable for quick UI display/download.
+
+---
+
+## 🧭 Judge Demo Flow
+
+Use the **Judge Demo Mode** button in the UI to run this scripted sequence automatically:
+
+1. Standard bug-detection run
+2. Hallucination trap run (false-positive simulation)
+3. Adversarial test generation with rationale
+4. Benchmark suite generation and leaderboard update
+
+This gives a stable 60-second showcase with minimal manual steps.
 
 ---
 
@@ -218,6 +275,8 @@ python inference.py
 - [x] `inference.py` runs successfully
 - [x] No LLM in the grading loop
 - [x] Runtime < 20 minutes on 2 vCPU / 8 GB RAM
+- [x] Live demo UI with explainable scoring
+- [x] Benchmark report endpoints + judge demo mode
 
 ---
 
