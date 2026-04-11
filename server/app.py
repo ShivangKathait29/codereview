@@ -820,6 +820,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     "🚨 Incorrect Issue Mapping",
                     "",
                     "No issue mismatch detected.",
+                    "",
+                    "🧠 Reasoning Alignment Score: HIGH",
                 ].join("\n");
             }
 
@@ -833,6 +835,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 "",
                 `Detected: ${detectedIssue} ❌`,
                 `Expected: ${expected} ✅`,
+                "",
+                "🧠 Reasoning Alignment Score: LOW",
                 "",
                 "👉 Judges LOVE this.",
             ].join("\n");
