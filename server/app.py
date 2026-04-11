@@ -758,7 +758,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             const issue = Number(grader.issue_score || 0);
             const fix = Number(grader.fix_score || 0);
             const explanation = Number(grader.explanation_score || 0);
-            const total = Number(grader.final_score || 0);
+            const total = Number((grader.total_score ?? grader.final_score) || 0);
             return [
                 `Issue        ${rewardBar(issue, 0.5)} ${issue.toFixed(2)} / 0.50`,
                 `Fix          ${rewardBar(fix, 0.3)} ${fix.toFixed(2)} / 0.30`,
@@ -859,7 +859,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 source: source,
                 mode: isHallucinationMode() ? "hallucination" : "standard",
                 variant: String((data && data.variant) || "-"),
-                final_score: Number(grader.final_score || 0),
+                final_score: Number((grader.total_score ?? grader.final_score) || 0),
+                api_adjusted_final_score: Number(grader.final_score || 0),
                 issue_score: Number(grader.issue_score || 0),
                 fix_score: Number(grader.fix_score || 0),
                 explanation_score: Number(grader.explanation_score || 0),
@@ -896,6 +897,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 `Mode: ${String(scorecard.mode || "standard")}`,
                 `Variant: ${String(scorecard.variant || "-")}`,
                 `Final Score: ${Number(scorecard.final_score || 0).toFixed(2)}`,
+                `API Adjusted Score: ${Number((scorecard.api_adjusted_final_score ?? scorecard.final_score) || 0).toFixed(2)}`,
                 `Issue/Fix/Explanation: ${Number(scorecard.issue_score || 0).toFixed(2)} / ${Number(scorecard.fix_score || 0).toFixed(2)} / ${Number(scorecard.explanation_score || 0).toFixed(2)}`,
                 `Hallucination Detected: ${Boolean(scorecard.hallucination_detected) ? "Yes" : "No"}`,
                 `Penalty Applied: ${Number(scorecard.penalty_applied || 0).toFixed(2)}`,
@@ -920,7 +922,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             explanationScoreEl.textContent = Number(grader.explanation_score || 0).toFixed(2);
             variantNameEl.textContent = data.variant || variantNameEl.textContent || "-";
 
-            const finalScore = Number(grader.final_score || 0);
+            const finalScore = Number((grader.total_score ?? grader.final_score) || 0);
             finalScoreEl.textContent = finalScore.toFixed(2);
             scoreFillEl.style.width = `${Math.max(0, Math.min(1, finalScore)) * 100}%`;
             rewardVizTextEl.textContent = renderRewardVisualization(grader);
@@ -958,7 +960,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 issue: Number(grader.issue_score || 0),
                 fix: Number(grader.fix_score || 0),
                 explanation: Number(grader.explanation_score || 0),
-                total: Number(grader.final_score || 0),
+                total: Number((grader.total_score ?? grader.final_score) || 0),
+                api_adjusted_final: Number(grader.final_score || 0),
                 hallucination_detected: Boolean(grader.hallucination_detected || false),
                 penalty_applied: Number(grader.penalty_applied || 0),
                 error_classification: grader.error_classification || {},
@@ -1097,7 +1100,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 }
 
                 const grader = data.grader_output || {};
-                const finalScore = Number(grader.final_score || 0);
+                const finalScore = Number((grader.total_score ?? grader.final_score) || 0);
                 total += finalScore;
                 successful += 1;
                 lines.push(`${TASK_LABELS[taskIndex]} | score=${finalScore.toFixed(2)} | issue=${Number(grader.issue_score || 0).toFixed(2)} fix=${Number(grader.fix_score || 0).toFixed(2)} expl=${Number(grader.explanation_score || 0).toFixed(2)}`);
@@ -1297,7 +1300,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     silent: true,
                 });
                 if (standardData) {
-                    const score = Number((standardData.grader_output || {}).final_score || 0).toFixed(2);
+                    const score = Number(((standardData.grader_output || {}).total_score ?? (standardData.grader_output || {}).final_score) || 0).toFixed(2);
                     logLines.push(`1) Baseline bug detection run completed (score ${score}).`);
                 } else {
                     logLines.push("1) Baseline bug detection run failed.");
@@ -1372,7 +1375,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     silent: true,
                 });
                 if (baseline) {
-                    const score = Number((baseline.grader_output || {}).final_score || 0);
+                    const score = Number(((baseline.grader_output || {}).total_score ?? (baseline.grader_output || {}).final_score) || 0);
                     runRows.push({ step: "Baseline Detection", final_score: score, note: "Standard task" });
                     logLines.push(`1) Baseline detection: ${score.toFixed(2)}`);
                 } else {
@@ -1399,7 +1402,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     silent: true,
                 });
                 if (edgeRun) {
-                    const score = Number((edgeRun.grader_output || {}).final_score || 0);
+                    const score = Number(((edgeRun.grader_output || {}).total_score ?? (edgeRun.grader_output || {}).final_score) || 0);
                     const insight = String((edgeRun.missed_insight || {}).text || "edge-case insight reviewed");
                     runRows.push({ step: "Edge Case Proof", final_score: score, note: insight });
                     logLines.push(`2) Edge-case proof: ${score.toFixed(2)} | ${insight}`);
@@ -1420,7 +1423,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 });
                 if (halluRun) {
                     const penalty = Number((halluRun.grader_output || {}).penalty_applied || 0);
-                    const score = Number((halluRun.grader_output || {}).final_score || 0);
+                    const score = Number(((halluRun.grader_output || {}).total_score ?? (halluRun.grader_output || {}).final_score) || 0);
                     runRows.push({ step: "Hallucination Trap", final_score: score, note: `Penalty -${penalty.toFixed(1)}` });
                     logLines.push(`3) Hallucination trap: ${score.toFixed(2)} | penalty -${penalty.toFixed(1)}`);
                 } else {
@@ -1618,15 +1621,17 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
     penalties = 0.5 if false_positive else 0.0
     bonus = 0.0
 
-    # Requested demo behavior:
-    # - Correct agent should score exactly 1.0
-    # - False-positive case should show penalty -0.5 and final score 0.2
+    # Strict behavior:
+    # - Hallucination must hard-zero the true score.
+    # - API-facing score keeps a minimal floor for strict-open validator compatibility.
+    true_score = issue_score + fix_score + explanation_score
     if false_positive:
-        final_score = 0.2
-    elif issue_ok and fix_ok and explanation_ok:
-        final_score = 1.0
-    else:
-        final_score = max(0.0, min(1.0, issue_score + fix_score + explanation_score - penalties + bonus))
+        issue_score = 0.0
+        fix_score = 0.0
+        explanation_score = 0.0
+        true_score = 0.0
+
+    final_score = max(0.01, true_score)
 
     reason_items = [
         {
@@ -1652,10 +1657,11 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
         f"  Issue Score: {issue_score:.2f}",
         f"  Fix Score: {fix_score:.2f}",
         f"  Explanation Score: {explanation_score:.2f}",
-        f"  Penalties: -{penalties:.2f}",
+        f"  Penalty: {'Applied (Hallucination)' if false_positive else 'Not applied'}",
         f"  Penalty Reason: {'hallucinated issue' if false_positive else 'none'}",
         f"  Bonus: +{bonus:.2f}",
-        f"  Final Score: {final_score:.2f}",
+        f"  Final Score (True): {true_score:.2f}",
+        f"  Final Score (API Adjusted): {final_score:.2f}",
     ]
 
     return {
@@ -1664,6 +1670,7 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
         "explanation_score": explanation_score,
         "penalties": penalties,
         "bonus": bonus,
+        "total_score": true_score,
         "final_score": final_score,
         "hallucination_detected": false_positive,
         "penalty_applied": penalties,
@@ -1858,7 +1865,7 @@ def _build_error_classification(
 
 def _normalize_code(text: str) -> str:
     """Normalize code for variant matching."""
-    return re.sub(r"\s+", " ", text.strip())
+    return re.sub(r"\s+", "", text.strip())
 
 
 def _match_task_by_code(task_index: int, code_input: str, fallback_task: Optional[Task]) -> Task:
@@ -1870,6 +1877,21 @@ def _match_task_by_code(task_index: int, code_input: str, fallback_task: Optiona
         if _normalize_code(task.code) == target:
             return task
     return fallback_task or TASKS[max(0, min(task_index, len(TASKS) - 1))][0]
+
+
+def _match_task_globally_by_code(code_input: str) -> Optional[tuple[int, Task]]:
+    """Find exact task variant across all task groups by normalized code match."""
+    target = _normalize_code(code_input)
+    for idx, task_group in enumerate(TASKS):
+        for task in task_group:
+            if _normalize_code(task.code) == target:
+                return (idx, task)
+    return None
+
+
+def _is_hallucination_reference_code(code_input: str) -> bool:
+    """Return True only for the canonical no-bug hallucination snippet."""
+    return _normalize_code(code_input) == _normalize_code(HALLUCINATION_SAFE_CODE)
 
 
 def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: str) -> dict[str, str]:
@@ -2210,7 +2232,7 @@ def _run_benchmark_suite() -> dict[str, object]:
     for model_name in model_names:
         review = hallucination_reviews[model_name]
         scored = _grade_hallucination_review(review)
-        final_score = float(scored.get("final_score", 0.0))
+        final_score = float(scored.get("total_score", scored.get("final_score", 0.0)))
         false_positive = bool(scored.get("hallucination_detected", False))
         scenario_scores[model_name] = final_score
 
@@ -2227,6 +2249,7 @@ def _run_benchmark_suite() -> dict[str, object]:
                 "mode": "hallucination",
                 "model": model_name,
                 "final_score": final_score,
+                "api_adjusted_final_score": float(scored.get("final_score", final_score)),
                 "hallucination_detected": false_positive,
             }
         )
@@ -2457,9 +2480,17 @@ async def mcp() -> dict:
 async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
     """Run code-input → agent-output → grader-output pipeline for live demos."""
     try:
-        mode = (request.mode or "standard").strip().lower()
+        requested_mode = (request.mode or "standard").strip().lower()
+        provided_code = request.code_input.strip() if request.code_input and request.code_input.strip() else ""
+        mode = requested_mode
+
+        # Prevent label mismatch: non-reference code cannot be treated as hallucination no-bug mode.
+        if requested_mode == "hallucination" and provided_code and not request.force_false_positive:
+            if not _is_hallucination_reference_code(provided_code):
+                mode = "standard"
+
         if mode == "hallucination":
-            code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else HALLUCINATION_SAFE_CODE
+            code_input = provided_code if provided_code else HALLUCINATION_SAFE_CODE
 
             if request.force_false_positive:
                 review = _compose_structured_review(
@@ -2497,6 +2528,7 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
             return {
                 "task_index": 3,
                 "variant": "Hallucination Detection (No Bug)",
+                "mode_applied": "hallucination",
                 "instructions": "Detect false positives. The correct issue is None for this snippet.",
                 "code_input": code_input,
                 "agent_output": {
@@ -2512,7 +2544,7 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                     "issue_score": float(hallucination_scores["issue_score"]),
                     "fix_score": float(hallucination_scores["fix_score"]),
                     "explanation_score": float(hallucination_scores["explanation_score"]),
-                    "total_score": float(hallucination_scores["final_score"]),
+                    "total_score": float(hallucination_scores.get("total_score", hallucination_scores["final_score"])),
                     "final_score": float(hallucination_scores["final_score"]),
                     "hallucination_detected": bool(hallucination_scores.get("hallucination_detected", False)),
                     "penalty_applied": float(hallucination_scores.get("penalty_applied", 0.0)),
@@ -2522,45 +2554,53 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                 },
             }
 
+        inferred_task_index = int(request.task_index)
         reset_result = env.reset(task_index=request.task_index)
         sampled_code = reset_result.observation.code
-        code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else sampled_code
-        task_for_ground_truth = _match_task_by_code(
-            request.task_index,
-            code_input,
-            getattr(env, "_current_task", None),
-        )
+        code_input = provided_code if provided_code else sampled_code
+
+        exact_match = _match_task_globally_by_code(code_input) if provided_code else None
+        if exact_match is not None:
+            inferred_task_index, task_for_ground_truth = exact_match
+        else:
+            task_for_ground_truth = _match_task_by_code(
+                request.task_index,
+                code_input,
+                getattr(env, "_current_task", None),
+            )
+
+        variant_name = getattr(task_for_ground_truth, "title", None) or getattr(env.state, "variant_id", "Unknown Variant")
+        instructions = getattr(task_for_ground_truth, "instructions", None) or reset_result.observation.instructions
         ground_truth = _build_ground_truth_correction(task=task_for_ground_truth, code_input=code_input, mode="standard")
 
         raw_review = fallback_review(code_input)
-        review = optimize_review_for_grader(raw_review, task_idx=request.task_index, code=code_input)
-
-        step_result = env.step(CodeReviewAction(review=review))
-        info = step_result.info or {}
+        review = optimize_review_for_grader(raw_review, task_idx=inferred_task_index, code=code_input)
+        standard_scores = _score_standard_review(review, task_for_ground_truth)
         fields = _extract_agent_fields(review)
         reasoning_steps = _build_reasoning_steps(fields)
-        reason_items = _build_reason_items(info)
+        reason_items = list(standard_scores.get("reason_items", []))
         missed_insight = _build_missed_insight_highlight(
             mode="standard",
             code_input=code_input,
             review_text=review,
             ground_truth=ground_truth,
-            issue_score=float(info.get("issue_score", 0.0)),
+            issue_score=float(standard_scores.get("issue_score", 0.0)),
         )
         error_classification = _build_error_classification(
             mode="standard",
             code_input=code_input,
             expected_issue=" ".join(getattr(task_for_ground_truth, "expected_issues", []) or []),
-            issue_score=float(info.get("issue_score", 0.0)),
-            fix_score=float(info.get("fix_score", 0.0)),
-            explanation_score=float(info.get("explanation_score", 0.0)),
+            issue_score=float(standard_scores.get("issue_score", 0.0)),
+            fix_score=float(standard_scores.get("fix_score", 0.0)),
+            explanation_score=float(standard_scores.get("explanation_score", 0.0)),
             hallucination_detected=False,
         )
 
         return {
-            "task_index": request.task_index,
-            "variant": env.state.variant_id,
-            "instructions": reset_result.observation.instructions,
+            "task_index": int(inferred_task_index),
+            "variant": variant_name,
+            "mode_applied": "standard",
+            "instructions": instructions,
             "code_input": code_input,
             "agent_output": {
                 "issue": fields["issue"],
@@ -2572,16 +2612,16 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
             "ground_truth": ground_truth,
             "missed_insight": missed_insight,
             "grader_output": {
-                "issue_score": float(info.get("issue_score", 0.0)),
-                "fix_score": float(info.get("fix_score", 0.0)),
-                "explanation_score": float(info.get("explanation_score", 0.0)),
-                "total_score": float(info.get("total_score", info.get("total", 0.0))),
-                "final_score": float(info.get("total_score", info.get("total", step_result.reward))),
+                "issue_score": float(standard_scores.get("issue_score", 0.0)),
+                "fix_score": float(standard_scores.get("fix_score", 0.0)),
+                "explanation_score": float(standard_scores.get("explanation_score", 0.0)),
+                "total_score": float(standard_scores.get("final_score", 0.0)),
+                "final_score": float(standard_scores.get("final_score", 0.0)),
                 "hallucination_detected": False,
                 "penalty_applied": 0.0,
                 "reason_items": reason_items,
                 "error_classification": error_classification,
-                "feedback": step_result.observation.feedback,
+                "feedback": str(standard_scores.get("feedback", "No feedback returned.")),
             },
         }
     except Exception as exc:
@@ -2606,7 +2646,8 @@ async def demo_compare(request: DemoEvaluateRequest) -> dict:
                         "issue_score": float(scored["issue_score"]),
                         "fix_score": float(scored["fix_score"]),
                         "explanation_score": float(scored["explanation_score"]),
-                        "final_score": float(scored["final_score"]),
+                        "final_score": float(scored.get("total_score", scored["final_score"])),
+                        "api_adjusted_final_score": float(scored["final_score"]),
                         "review": review,
                     }
                 )
