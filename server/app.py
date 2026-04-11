@@ -1167,7 +1167,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 }
 
                 const lines = [data.risk_type === "no_bug_sanity" ? "🧪 Sanity Tests (No Bug Case)" : "🧪 Adversarial Tests", ""];
-                if (headline) {
+                if (headline && headline !== lines[0]) {
                     lines.push(headline);
                     lines.push("");
                 }
@@ -2028,6 +2028,8 @@ def _generate_adversarial_tests(code_input: str, expected_issues: Optional[list[
     # No-bug ground truth must produce sanity checks only.
     generate_safe_tests_only = normalized_expected == ["none"]
     if generate_safe_tests_only:
+        # Keep naming deterministic for no-bug hallucination demos.
+        fn = "add"
         tests.append(
             {
                 "name": "Test 1",
