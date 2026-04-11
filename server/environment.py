@@ -273,12 +273,17 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower().strip())
 
 
+def _strict_unit(x: float, eps: float = 0.01) -> float:
+    """Clamp to a strict open interval (0, 1)."""
+    return min(1.0 - eps, max(eps, x))
+
+
 def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dict[str, float]]:
     """
     Grade a code review deterministically.
 
     Returns:
-        (reward, feedback, info_dict) where reward ∈ [0.0, 1.0]
+        (reward, feedback, info_dict) where reward ∈ (0.0, 1.0)
     """
     normalized = _normalize(review)
     breakdown: list[str] = []
@@ -328,8 +333,8 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
         bonus += 0.1
         breakdown.append("  ★ Bonus: structured explanation → +0.1")
 
-    # --- Final reward (clamped to [0.0, 1.0]) ---------------------------------
-    reward = max(0.0, min(1.0, raw_score - penalties + bonus))
+    # --- Final reward (clamped to strict open interval) ------------------------
+    reward = _strict_unit(max(0.0, min(1.0, raw_score - penalties + bonus)))
     breakdown.insert(0, f"Task: {task.title} ({task.difficulty})")
     breakdown.append(f"  ─────────────────────────────")
     breakdown.append(f"  Raw: {raw_score:.2f}  Penalties: −{penalties:.2f}  Bonus: +{bonus:.2f}")
@@ -362,13 +367,13 @@ def is_malicious(review: str) -> bool:
 def grade_review(review: str, task: Task) -> tuple[float, str, dict[str, float]]:
     """Grade a code review deterministically for reproducible evaluation."""
     if is_malicious(review):
-        return 0.0, "Input flagged as malicious.", {
+        return 0.01, "Input flagged as malicious.", {
             "issue_score": 0.0,
             "fix_score": 0.0,
             "explanation_score": 0.0,
             "penalties": 1.0,
             "bonus": 0.0,
-            "total": 0.0,
+            "total": 0.01,
         }
 
     return deterministic_grade_review(review, task)

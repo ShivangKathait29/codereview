@@ -253,6 +253,9 @@ def main() -> None:
             step_result = client.step(review=review)
             reward_raw = float(step_result.reward or 0.0)
             reward = _strict_unit(reward_raw)
+            score_info = dict(step_result.info or {})
+            if "total" in score_info:
+                score_info["total"] = _strict_unit(float(score_info["total"]))
             done = bool(step_result.done)
 
             rewards.append(reward)
@@ -269,8 +272,8 @@ def main() -> None:
                 "task_id": task_label,
                 "variant": state.variant_id,
                 "review": review,
-                "info": step_result.info,
-                "reward": reward_raw,
+                "info": score_info,
+                "reward": reward,
                 "model": MODEL_NAME,
                 "timestamp": timestamp
             })
