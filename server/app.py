@@ -270,6 +270,42 @@ DEMO_PAGE_HTML = r"""
             min-height: 1.2rem;
         }
 
+        .status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .source-badge {
+            border-radius: 999px;
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border: 1px solid transparent;
+            font-family: "IBM Plex Mono", Consolas, monospace;
+            user-select: none;
+        }
+
+        .source-badge.live {
+            background: #e8f9ef;
+            color: #17603b;
+            border-color: #9cd8b3;
+        }
+
+        .source-badge.cached {
+            background: #fff6e6;
+            color: #81510f;
+            border-color: #e9c27d;
+        }
+
+        .source-badge.offline {
+            background: #fff0f0;
+            color: #9d2424;
+            border-color: #e6a2a2;
+        }
+
         .score-line {
             margin-top: 10px;
             border: 1px solid var(--line);
@@ -385,18 +421,27 @@ DEMO_PAGE_HTML = r"""
                     </div>
                     <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem; color:#34555b; margin-bottom:10px;">
                         <input id="falsePositiveToggle" type="checkbox" />
-                        Simulate false positive ("Possible overflow")
+                        Simulate false positive ("Possible overflow") - auto-switches to Hallucination mode
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:0.9rem; color:#34555b; margin-bottom:10px;">
+                        <input id="failsafeToggle" type="checkbox" checked />
+                        Fail-safe demo mode (use cached result on timeout/failure)
                     </label>
                     <div id="halluBadge" class="badge" style="display:none;">🧠 Hallucination Check Enabled</div>
-                    <div id="status" class="status">Load a task, optionally edit code, then run evaluation.</div>
+                    <div class="status-row">
+                        <div id="status" class="status">Load a task, optionally edit code, then run evaluation.</div>
+                        <div id="sourceBadge" class="source-badge live">LIVE</div>
+                    </div>
                     <textarea id="codeInput" placeholder="Paste code here..."></textarea>
                     <div class="sub-controls">
                         <button id="compareBtn">Run Model Comparison</button>
                         <button id="benchmarkBtn">Run Benchmark Report</button>
                         <button id="judgeDemoBtn" class="primary">Judge Demo Mode ⚡</button>
+                        <button id="finalJudgeRunBtn" class="primary">Final Judge Run 🏁</button>
                         <button id="adversarialBtn">Generate Adversarial Tests 🧪</button>
                         <button id="replayBtn">Auto Replay</button>
                         <button id="downloadBtn" disabled>Download Replay Report</button>
+                        <button id="downloadScorecardBtn" disabled>Download Judge Scorecard</button>
                         <button id="resetAnalyticsBtn">Reset Analytics</button>
                         <button id="docsBtn">Open API Docs</button>
                     </div>
@@ -451,6 +496,14 @@ Total        ⭐ 0.00 / 1.00</pre>
                     <div id="hallucinationAlert" class="danger-banner"></div>
                     <pre id="whyScoreText">No evaluation yet.</pre>
                     <pre id="feedbackText" style="margin-top: 10px;">No evaluation yet.</pre>
+                    <pre id="groundTruthText" style="margin-top: 10px;">🧠 Correct Analysis (Ground Truth)
+
+Run evaluation to reveal expected issue, fix, and failure case.</pre>
+                    <pre id="missedInsightText" style="margin-top: 10px;">⚠️ Missed Insight:
+No critical missed insight detected yet.
+
+👉 This shows:
+edge-case coverage is currently acceptable</pre>
                     <details>
                         <summary>Show JSON Logs ▼</summary>
                         <pre id="jsonLogsText">{
@@ -470,6 +523,10 @@ Logical Errors    ░░░░░░░░░░░░░░░░░░░░ 0
 Edge Case Misses ░░░░░░░░░░░░░░░░░░░░ 0.0%
 Hallucinations   ░░░░░░░░░░░░░░░░░░░░ 0.0%
 Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.0%</pre>
+            </div>
+            <div class="panel" style="margin-top: 10px;">
+                <h3>Judge Scorecard</h3>
+                <pre id="scorecardText">No scorecard yet. Run evaluation or Final Judge Run.</pre>
             </div>
             <details>
                 <summary>Benchmark & Replay Logs ▼</summary>
@@ -493,13 +550,17 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const compareBtn = document.getElementById("compareBtn");
         const benchmarkBtn = document.getElementById("benchmarkBtn");
         const judgeDemoBtn = document.getElementById("judgeDemoBtn");
+        const finalJudgeRunBtn = document.getElementById("finalJudgeRunBtn");
         const adversarialBtn = document.getElementById("adversarialBtn");
         const replayBtn = document.getElementById("replayBtn");
         const downloadBtn = document.getElementById("downloadBtn");
+        const downloadScorecardBtn = document.getElementById("downloadScorecardBtn");
         const resetAnalyticsBtn = document.getElementById("resetAnalyticsBtn");
         const falsePositiveToggleEl = document.getElementById("falsePositiveToggle");
+        const failsafeToggleEl = document.getElementById("failsafeToggle");
         const docsBtn = document.getElementById("docsBtn");
         const statusEl = document.getElementById("status");
+        const sourceBadgeEl = document.getElementById("sourceBadge");
 
         const agentIssueEl = document.getElementById("agentIssue");
         const agentFixEl = document.getElementById("agentFix");
@@ -510,6 +571,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const explanationScoreEl = document.getElementById("explanationScore");
         const finalScoreEl = document.getElementById("finalScore");
         const feedbackTextEl = document.getElementById("feedbackText");
+        const groundTruthTextEl = document.getElementById("groundTruthText");
+        const missedInsightTextEl = document.getElementById("missedInsightText");
         const hallucinationAlertEl = document.getElementById("hallucinationAlert");
         const halluBadgeEl = document.getElementById("halluBadge");
         const comparisonTextEl = document.getElementById("comparisonText");
@@ -518,11 +581,15 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const rewardVizTextEl = document.getElementById("rewardVizText");
         const jsonLogsTextEl = document.getElementById("jsonLogsText");
         const whyScoreTextEl = document.getElementById("whyScoreText");
+        const scorecardTextEl = document.getElementById("scorecardText");
         const replayLogEl = document.getElementById("replayLog");
         const scoreFillEl = document.getElementById("scoreFill");
         const variantNameEl = document.getElementById("variantName");
         let lastReplayReport = null;
+        let lastScorecardReport = null;
         const errorHistory = [];
+        const evaluationCache = new Map();
+        const EVAL_TIMEOUT_MS = 2600;
 
         const TASK_LABELS = {
             0: "Task 1 — Easy",
@@ -550,10 +617,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const syncModeUI = () => {
             const hallu = isHallucinationMode();
             taskIndexEl.disabled = hallu;
-            falsePositiveToggleEl.disabled = !hallu;
-            halluBadgeEl.style.display = hallu ? "inline-flex" : "none";
+            falsePositiveToggleEl.disabled = false;
+            halluBadgeEl.style.display = (hallu || falsePositiveToggleEl.checked) ? "inline-flex" : "none";
             if (!hallu) {
-                falsePositiveToggleEl.checked = false;
                 hallucinationAlertEl.classList.remove("show");
                 hallucinationAlertEl.textContent = "";
             }
@@ -568,10 +634,13 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             compareBtn.disabled = busy;
             benchmarkBtn.disabled = busy;
             judgeDemoBtn.disabled = busy;
+            finalJudgeRunBtn.disabled = busy;
             adversarialBtn.disabled = busy;
             replayBtn.disabled = busy;
             downloadBtn.disabled = busy || !lastReplayReport;
-            falsePositiveToggleEl.disabled = busy || !isHallucinationMode();
+            downloadScorecardBtn.disabled = busy || !lastScorecardReport;
+            falsePositiveToggleEl.disabled = busy;
+            failsafeToggleEl.disabled = busy;
         };
 
         const shortText = (text, limit = 180) => {
@@ -699,6 +768,219 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             ].join("\n");
         };
 
+        const renderGroundTruth = (groundTruth) => {
+            const gt = groundTruth && typeof groundTruth === "object" ? groundTruth : {};
+            const issue = String(gt.issue || "-");
+            const whyWrong = String(gt.why_wrong || "-");
+            const correctFix = String(gt.correct_fix || "-");
+            const exampleFailure = String(gt.example_failure || "-");
+            return [
+                "🧠 Correct Analysis (Ground Truth)",
+                "",
+                "✔ Issue:",
+                issue,
+                "",
+                "✔ Why it's wrong:",
+                whyWrong,
+                "",
+                "✔ Correct Fix:",
+                correctFix,
+                "",
+                "✔ Example Failure:",
+                exampleFailure,
+            ].join("\n");
+        };
+
+        const renderMissedInsight = (missedInsight) => {
+            const insight = missedInsight && typeof missedInsight === "object" ? missedInsight : {};
+            const text = String(insight.text || "No critical missed insight detected yet.");
+            const implication = String(insight.implication || "edge-case coverage is currently acceptable");
+            return [
+                "⚠️ Missed Insight:",
+                text,
+                "",
+                "👉 This shows:",
+                implication,
+            ].join("\n");
+        };
+
+        const setSourceBadge = (source) => {
+            sourceBadgeEl.classList.remove("live", "cached", "offline");
+            if (source === "cached") {
+                sourceBadgeEl.classList.add("cached");
+                sourceBadgeEl.textContent = "CACHED";
+                return;
+            }
+            if (source === "offline") {
+                sourceBadgeEl.classList.add("offline");
+                sourceBadgeEl.textContent = "OFFLINE";
+                return;
+            }
+            sourceBadgeEl.classList.add("live");
+            sourceBadgeEl.textContent = "LIVE";
+        };
+
+        const buildEvalCacheKey = (payload) => {
+            const code = String((payload && payload.code_input) || "").replace(/\s+/g, " ").trim();
+            return [
+                String((payload && payload.mode) || "standard"),
+                Number((payload && payload.task_index) || 0),
+                Boolean(payload && payload.force_false_positive) ? "fp1" : "fp0",
+                code,
+            ].join("|");
+        };
+
+        const cacheEvaluationResult = (cacheKey, data) => {
+            evaluationCache.set(cacheKey, {
+                ts: Date.now(),
+                data: data,
+            });
+            if (evaluationCache.size <= 40) {
+                return;
+            }
+            const oldest = [...evaluationCache.entries()].sort((a, b) => Number(a[1].ts || 0) - Number(b[1].ts || 0))[0];
+            if (oldest) {
+                evaluationCache.delete(oldest[0]);
+            }
+        };
+
+        const getCachedEvaluation = (cacheKey) => {
+            const row = evaluationCache.get(cacheKey);
+            return row && row.data ? row.data : null;
+        };
+
+        const buildSingleRunScorecard = (data, source) => {
+            const grader = data && data.grader_output ? data.grader_output : {};
+            const missedInsight = data && data.missed_insight ? data.missed_insight : {};
+            const groundTruth = data && data.ground_truth ? data.ground_truth : {};
+            return {
+                type: "single-evaluation",
+                generated_at: new Date().toISOString(),
+                source: source,
+                mode: isHallucinationMode() ? "hallucination" : "standard",
+                variant: String((data && data.variant) || "-"),
+                final_score: Number(grader.final_score || 0),
+                issue_score: Number(grader.issue_score || 0),
+                fix_score: Number(grader.fix_score || 0),
+                explanation_score: Number(grader.explanation_score || 0),
+                hallucination_detected: Boolean(grader.hallucination_detected || false),
+                penalty_applied: Number(grader.penalty_applied || 0),
+                missed_insight: String(missedInsight.text || "None"),
+                ground_truth_issue: String(groundTruth.issue || "-"),
+            };
+        };
+
+        const renderScorecard = (scorecard) => {
+            if (!scorecard || typeof scorecard !== "object") {
+                return "No scorecard yet. Run evaluation or Final Judge Run.";
+            }
+
+            if (Array.isArray(scorecard.runs)) {
+                const lines = [
+                    "Judge Scorecard (Final Judge Run)",
+                    `Generated: ${String(scorecard.generated_at || "-")}`,
+                    `Average Score: ${Number(scorecard.average_score || 0).toFixed(2)}`,
+                    `Benchmark Leader: ${String(scorecard.benchmark_leader || "-")}`,
+                    "",
+                ];
+                for (const run of scorecard.runs) {
+                    lines.push(`${String(run.step || "-")}: ${Number(run.final_score || 0).toFixed(2)} (${String(run.note || "-")})`);
+                }
+                return lines.join("\n");
+            }
+
+            return [
+                "Judge Scorecard (Live Run)",
+                `Generated: ${String(scorecard.generated_at || "-")}`,
+                `Source: ${String(scorecard.source || "live")}`,
+                `Mode: ${String(scorecard.mode || "standard")}`,
+                `Variant: ${String(scorecard.variant || "-")}`,
+                `Final Score: ${Number(scorecard.final_score || 0).toFixed(2)}`,
+                `Issue/Fix/Explanation: ${Number(scorecard.issue_score || 0).toFixed(2)} / ${Number(scorecard.fix_score || 0).toFixed(2)} / ${Number(scorecard.explanation_score || 0).toFixed(2)}`,
+                `Hallucination Detected: ${Boolean(scorecard.hallucination_detected) ? "Yes" : "No"}`,
+                `Penalty Applied: ${Number(scorecard.penalty_applied || 0).toFixed(2)}`,
+                `Missed Insight: ${String(scorecard.missed_insight || "None")}`,
+                `Ground Truth Issue: ${String(scorecard.ground_truth_issue || "-")}`,
+            ].join("\n");
+        };
+
+        const applyEvaluationData = (data, options = {}) => {
+            const silent = Boolean(options.silent);
+            const fromCache = Boolean(options.fromCache);
+            const agent = data.agent_output || {};
+            const grader = data.grader_output || {};
+
+            agentIssueEl.textContent = shortText(agent.issue);
+            agentFixEl.textContent = shortText(agent.fix);
+            agentExplanationEl.textContent = shortText(agent.explanation);
+            reasoningStepsTextEl.textContent = renderReasoningSteps(agent.reasoning_steps || []);
+
+            issueScoreEl.textContent = Number(grader.issue_score || 0).toFixed(2);
+            fixScoreEl.textContent = Number(grader.fix_score || 0).toFixed(2);
+            explanationScoreEl.textContent = Number(grader.explanation_score || 0).toFixed(2);
+            variantNameEl.textContent = data.variant || variantNameEl.textContent || "-";
+
+            const finalScore = Number(grader.final_score || 0);
+            finalScoreEl.textContent = finalScore.toFixed(2);
+            scoreFillEl.style.width = `${Math.max(0, Math.min(1, finalScore)) * 100}%`;
+            rewardVizTextEl.textContent = renderRewardVisualization(grader);
+            whyScoreTextEl.textContent = renderReasonItems(grader.reason_items || []);
+            feedbackTextEl.textContent = grader.feedback || "No feedback returned.";
+            groundTruthTextEl.textContent = renderGroundTruth(data.ground_truth || {});
+            missedInsightTextEl.textContent = renderMissedInsight(data.missed_insight || {});
+
+            if (!fromCache) {
+                const classification = grader.error_classification || {};
+                const runCounts = {
+                    logical_errors: Number((classification.counts && classification.counts.logical_errors) || 0),
+                    edge_case_misses: Number((classification.counts && classification.counts.edge_case_misses) || 0),
+                    hallucinations: Number((classification.counts && classification.counts.hallucinations) || 0),
+                    fix_errors: Number((classification.counts && classification.counts.fix_errors) || 0),
+                };
+                errorHistory.push(runCounts);
+                if (errorHistory.length > 120) {
+                    errorHistory.shift();
+                }
+                renderErrorDashboard();
+            }
+
+            const hallucinationDetected = Boolean(grader.hallucination_detected);
+            if (hallucinationDetected) {
+                const penaltyValue = Number(grader.penalty_applied || 0);
+                hallucinationAlertEl.textContent = `🚨 Hallucination Detected\n❌ False issue identified\nPenalty applied: -${penaltyValue.toFixed(1)}`;
+                hallucinationAlertEl.classList.add("show");
+            } else {
+                hallucinationAlertEl.classList.remove("show");
+                hallucinationAlertEl.textContent = "";
+            }
+
+            jsonLogsTextEl.textContent = JSON.stringify({
+                issue: Number(grader.issue_score || 0),
+                fix: Number(grader.fix_score || 0),
+                explanation: Number(grader.explanation_score || 0),
+                total: Number(grader.final_score || 0),
+                hallucination_detected: Boolean(grader.hallucination_detected || false),
+                penalty_applied: Number(grader.penalty_applied || 0),
+                error_classification: grader.error_classification || {},
+                language: String(languageSelectEl.value || "cpp"),
+                mode: String((options && options.mode) || (isHallucinationMode() ? "hallucination" : "standard")),
+                variant: String(data.variant || ""),
+                ground_truth: data.ground_truth || {},
+                missed_insight: data.missed_insight || {},
+                source: fromCache ? "cached-fallback" : "live",
+            }, null, 2);
+
+            lastScorecardReport = buildSingleRunScorecard(data, fromCache ? "cached-fallback" : "live");
+            scorecardTextEl.textContent = renderScorecard(lastScorecardReport);
+            downloadScorecardBtn.disabled = !lastScorecardReport;
+            setSourceBadge(fromCache ? "cached" : "live");
+
+            if (!silent) {
+                statusEl.textContent = fromCache ? "Live call failed/slow. Loaded cached evaluation (fail-safe mode)." : "Live evaluation complete.";
+            }
+            return data;
+        };
+
         async function loadSample() {
             statusEl.textContent = "Loading task code...";
             if (isHallucinationMode()) {
@@ -731,90 +1013,55 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         }
 
         async function runEvaluation(options = {}) {
-            const mode = String(options.mode ?? (isHallucinationMode() ? "hallucination" : "standard"));
+            const mode = String(
+                options.mode ?? ((isHallucinationMode() || falsePositiveToggleEl.checked) ? "hallucination" : "standard")
+            );
             const taskIndex = Number(options.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
             const codeInput = String(options.codeInput ?? codeInputEl.value ?? "");
             const forceFalsePositive = Boolean(options.forceFalsePositive ?? falsePositiveToggleEl.checked);
             const silent = Boolean(options.silent);
+            const useFailsafe = Boolean(options.useFailsafe ?? failsafeToggleEl.checked);
             if (!codeInput.trim()) {
                 statusEl.textContent = "Please provide code input before running.";
                 return null;
             }
 
-            if (!silent) { statusEl.textContent = "Running agent + grader..."; setBusy(true); }
+            const payload = {
+                task_index: taskIndex,
+                code_input: codeInput,
+                mode,
+                force_false_positive: forceFalsePositive,
+            };
+            const cacheKey = buildEvalCacheKey(payload);
+
+            if (!silent) { statusEl.textContent = "Running agent + grader..."; setBusy(true); setSourceBadge("live"); }
             try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), EVAL_TIMEOUT_MS);
                 const response = await fetch("/demo/evaluate", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        task_index: taskIndex,
-                        code_input: codeInput,
-                        mode,
-                        force_false_positive: forceFalsePositive,
-                    }),
+                    body: JSON.stringify(payload),
+                    signal: controller.signal,
                 });
+                clearTimeout(timer);
                 if (!response.ok) throw new Error("demo evaluate failed");
                 const data = await response.json();
-                const agent = data.agent_output || {};
-                const grader = data.grader_output || {};
-
-                agentIssueEl.textContent = shortText(agent.issue);
-                agentFixEl.textContent = shortText(agent.fix);
-                agentExplanationEl.textContent = shortText(agent.explanation);
-                reasoningStepsTextEl.textContent = renderReasoningSteps(agent.reasoning_steps || []);
-
-                issueScoreEl.textContent = Number(grader.issue_score || 0).toFixed(2);
-                fixScoreEl.textContent = Number(grader.fix_score || 0).toFixed(2);
-                explanationScoreEl.textContent = Number(grader.explanation_score || 0).toFixed(2);
-                variantNameEl.textContent = data.variant || variantNameEl.textContent || "-";
-
-                const finalScore = Number(grader.final_score || 0);
-                finalScoreEl.textContent = finalScore.toFixed(2);
-                scoreFillEl.style.width = `${Math.max(0, Math.min(1, finalScore)) * 100}%`;
-                rewardVizTextEl.textContent = renderRewardVisualization(grader);
-                whyScoreTextEl.textContent = renderReasonItems(grader.reason_items || []);
-                feedbackTextEl.textContent = grader.feedback || "No feedback returned.";
-
-                const classification = grader.error_classification || {};
-                const runCounts = {
-                    logical_errors: Number((classification.counts && classification.counts.logical_errors) || 0),
-                    edge_case_misses: Number((classification.counts && classification.counts.edge_case_misses) || 0),
-                    hallucinations: Number((classification.counts && classification.counts.hallucinations) || 0),
-                    fix_errors: Number((classification.counts && classification.counts.fix_errors) || 0),
-                };
-                errorHistory.push(runCounts);
-                if (errorHistory.length > 120) {
-                    errorHistory.shift();
-                }
-                renderErrorDashboard();
-
-                const hallucinationDetected = Boolean(grader.hallucination_detected);
-                if (hallucinationDetected) {
-                    const penaltyValue = Number(grader.penalty_applied || 0);
-                    hallucinationAlertEl.textContent = `🚨 Hallucination Detected\n❌ False issue identified\nPenalty applied: -${penaltyValue.toFixed(1)}`;
-                    hallucinationAlertEl.classList.add("show");
-                } else {
-                    hallucinationAlertEl.classList.remove("show");
-                    hallucinationAlertEl.textContent = "";
-                }
-
-                jsonLogsTextEl.textContent = JSON.stringify({
-                    issue: Number(grader.issue_score || 0),
-                    fix: Number(grader.fix_score || 0),
-                    explanation: Number(grader.explanation_score || 0),
-                    total: Number(grader.final_score || 0),
-                    hallucination_detected: Boolean(grader.hallucination_detected || false),
-                    penalty_applied: Number(grader.penalty_applied || 0),
-                    error_classification: grader.error_classification || {},
-                    language: String(languageSelectEl.value || "cpp"),
-                    mode: mode,
-                    variant: String(data.variant || ""),
-                }, null, 2);
-
-                if (!silent) { statusEl.textContent = "Live evaluation complete."; }
-                return data;
+                cacheEvaluationResult(cacheKey, data);
+                return applyEvaluationData(data, { silent, mode, fromCache: false });
             } catch (err) {
-                if (!silent) { statusEl.textContent = "Evaluation failed. Check server logs for details."; }
+                if (useFailsafe) {
+                    const cached = getCachedEvaluation(cacheKey);
+                    if (cached) {
+                        return applyEvaluationData(cached, { silent, mode, fromCache: true });
+                    }
+                }
+                if (!silent) {
+                    setSourceBadge("offline");
+                    statusEl.textContent = useFailsafe
+                        ? "Evaluation failed and no cache hit was available."
+                        : "Evaluation failed. Check server logs for details.";
+                }
                 return null;
             } finally {
                 if (!silent) { setBusy(false); }
@@ -1106,6 +1353,115 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             }
         }
 
+        async function runFinalJudgeRun() {
+            statusEl.textContent = "Running Final Judge Run...";
+            setBusy(true);
+            const runRows = [];
+            const logLines = ["Final Judge Run", ""];
+
+            try {
+                modeSelectEl.value = "normal";
+                syncModeUI();
+                taskIndexEl.value = "0";
+                await loadSample();
+                const baseline = await runEvaluation({
+                    mode: "standard",
+                    taskIndex: 0,
+                    codeInput: codeInputEl.value,
+                    forceFalsePositive: false,
+                    silent: true,
+                });
+                if (baseline) {
+                    const score = Number((baseline.grader_output || {}).final_score || 0);
+                    runRows.push({ step: "Baseline Detection", final_score: score, note: "Standard task" });
+                    logLines.push(`1) Baseline detection: ${score.toFixed(2)}`);
+                } else {
+                    logLines.push("1) Baseline detection failed.");
+                }
+
+                const negativeCaseCode = [
+                    "int findMax(vector<int>& arr) {",
+                    "    int mx = 0;",
+                    "    for (int x : arr) {",
+                    "        if (x > mx) mx = x;",
+                    "    }",
+                    "    return mx;",
+                    "}",
+                ].join("\n");
+                modeSelectEl.value = "normal";
+                syncModeUI();
+                codeInputEl.value = negativeCaseCode;
+                const edgeRun = await runEvaluation({
+                    mode: "standard",
+                    taskIndex: 0,
+                    codeInput: negativeCaseCode,
+                    forceFalsePositive: false,
+                    silent: true,
+                });
+                if (edgeRun) {
+                    const score = Number((edgeRun.grader_output || {}).final_score || 0);
+                    const insight = String((edgeRun.missed_insight || {}).text || "edge-case insight reviewed");
+                    runRows.push({ step: "Edge Case Proof", final_score: score, note: insight });
+                    logLines.push(`2) Edge-case proof: ${score.toFixed(2)} | ${insight}`);
+                } else {
+                    logLines.push("2) Edge-case proof failed.");
+                }
+
+                modeSelectEl.value = "hallucination";
+                syncModeUI();
+                await loadSample();
+                falsePositiveToggleEl.checked = true;
+                const halluRun = await runEvaluation({
+                    mode: "hallucination",
+                    taskIndex: 0,
+                    codeInput: codeInputEl.value,
+                    forceFalsePositive: true,
+                    silent: true,
+                });
+                if (halluRun) {
+                    const penalty = Number((halluRun.grader_output || {}).penalty_applied || 0);
+                    const score = Number((halluRun.grader_output || {}).final_score || 0);
+                    runRows.push({ step: "Hallucination Trap", final_score: score, note: `Penalty -${penalty.toFixed(1)}` });
+                    logLines.push(`3) Hallucination trap: ${score.toFixed(2)} | penalty -${penalty.toFixed(1)}`);
+                } else {
+                    logLines.push("3) Hallucination trap failed.");
+                }
+
+                const benchmark = await runBenchmarkReport({ silent: true });
+                const benchmarkLeader = benchmark && Array.isArray(benchmark.summary_rows) && benchmark.summary_rows.length > 0
+                    ? String(benchmark.summary_rows[0].model || "unknown")
+                    : "unknown";
+                logLines.push(`4) Benchmark leader: ${benchmarkLeader}`);
+
+                const validScores = runRows.map((x) => Number(x.final_score || 0));
+                const averageScore = validScores.length > 0
+                    ? validScores.reduce((a, b) => a + b, 0) / validScores.length
+                    : 0;
+                logLines.push("");
+                logLines.push(`Final Average (core 3 runs): ${averageScore.toFixed(2)}`);
+
+                lastScorecardReport = {
+                    type: "final-judge-run",
+                    generated_at: new Date().toISOString(),
+                    average_score: averageScore,
+                    benchmark_leader: benchmarkLeader,
+                    runs: runRows,
+                };
+                scorecardTextEl.textContent = renderScorecard(lastScorecardReport);
+                downloadScorecardBtn.disabled = !lastScorecardReport;
+                replayLogEl.textContent = logLines.join("\n");
+                statusEl.textContent = "Final Judge Run complete.";
+            } catch (err) {
+                replayLogEl.textContent = logLines.concat(["", "Final Judge Run interrupted by an error."]).join("\n");
+                statusEl.textContent = "Final Judge Run failed. Check server logs.";
+            } finally {
+                falsePositiveToggleEl.checked = false;
+                modeSelectEl.value = "normal";
+                syncModeUI();
+                setBusy(false);
+            }
+        }
+
         function downloadReplayReport() {
             if (!lastReplayReport) {
                 statusEl.textContent = "Run auto replay first to generate a report.";
@@ -1125,18 +1481,49 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             statusEl.textContent = "Replay report downloaded.";
         }
 
+        function downloadScorecardReport() {
+            if (!lastScorecardReport) {
+                statusEl.textContent = "Run evaluation or Final Judge Run to generate a scorecard.";
+                return;
+            }
+            const payload = JSON.stringify(lastScorecardReport, null, 2);
+            const blob = new Blob([payload], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const ts = new Date().toISOString().replace(/[:.]/g, "-");
+            a.href = url;
+            a.download = `judge-scorecard-${ts}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            statusEl.textContent = "Judge scorecard downloaded.";
+        }
+
         loadBtn.addEventListener("click", loadSample);
         runBtn.addEventListener("click", runEvaluation);
         compareBtn.addEventListener("click", runModelComparison);
         benchmarkBtn.addEventListener("click", () => { runBenchmarkReport(); });
         judgeDemoBtn.addEventListener("click", runJudgeDemoMode);
+        finalJudgeRunBtn.addEventListener("click", runFinalJudgeRun);
         adversarialBtn.addEventListener("click", runAdversarialTests);
         replayBtn.addEventListener("click", runAutoReplay);
         downloadBtn.addEventListener("click", downloadReplayReport);
+        downloadScorecardBtn.addEventListener("click", downloadScorecardReport);
         resetAnalyticsBtn.addEventListener("click", () => {
             errorHistory.length = 0;
             renderErrorDashboard();
             statusEl.textContent = "Error analytics reset.";
+        });
+        falsePositiveToggleEl.addEventListener("change", async () => {
+            if (falsePositiveToggleEl.checked && !isHallucinationMode()) {
+                modeSelectEl.value = "hallucination";
+                syncModeUI();
+                await loadSample();
+                statusEl.textContent = "False-positive simulation enabled. Switched to Hallucination mode.";
+            } else {
+                syncModeUI();
+            }
         });
         taskIndexEl.addEventListener("change", () => {
             loadSample();
@@ -1149,6 +1536,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
 
         syncModeUI();
         renderErrorDashboard();
+        setSourceBadge("live");
         loadSample();
     </script>
 </body>
@@ -1255,7 +1643,7 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
         },
         {
             "ok": not false_positive,
-            "message": "No hallucination detected" if not false_positive else "Penalty applied for hallucinated bug claim",
+            "message": "Strict check passed: no hallucinated issue" if not false_positive else "Penalty applied: hallucinated issue",
         },
     ]
 
@@ -1265,6 +1653,7 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
         f"  Fix Score: {fix_score:.2f}",
         f"  Explanation Score: {explanation_score:.2f}",
         f"  Penalties: -{penalties:.2f}",
+        f"  Penalty Reason: {'hallucinated issue' if false_positive else 'none'}",
         f"  Bonus: +{bonus:.2f}",
         f"  Final Score: {final_score:.2f}",
     ]
@@ -1481,6 +1870,126 @@ def _match_task_by_code(task_index: int, code_input: str, fallback_task: Optiona
         if _normalize_code(task.code) == target:
             return task
     return fallback_task or TASKS[max(0, min(task_index, len(TASKS) - 1))][0]
+
+
+def _build_ground_truth_correction(task: Optional[Task], code_input: str, mode: str) -> dict[str, str]:
+    """Return judge-facing ground truth analysis after grading."""
+    code_lower = (code_input or "").lower()
+    expected_blob = " ".join(getattr(task, "expected_issues", []) or []).lower()
+
+    if mode == "hallucination":
+        return {
+            "issue": "None (the function is already correct)",
+            "why_wrong": "Claiming a bug here is a false positive; the code is a direct return of a + b.",
+            "correct_fix": "No fix needed.",
+            "example_failure": "Input: add(2, 3)\\nOutput: 5 (already correct)",
+        }
+
+    if "mx = 0" in code_lower or "int mx=0" in code_lower or (
+        "max" in expected_blob and "negative" in expected_blob
+    ):
+        return {
+            "issue": "Incorrect initialization of max value (mx = 0)",
+            "why_wrong": "Fails for arrays with all negative numbers.",
+            "correct_fix": "int mx = arr[0];",
+            "example_failure": "Input: [-5, -2, -10]\\nOutput: 0 (wrong)\\nExpected: -2",
+        }
+
+    if "/" in code_input and "count" in code_lower and "division" in expected_blob:
+        return {
+            "issue": "Division by zero risk when count == 0",
+            "why_wrong": "The function can crash or return undefined behavior on zero denominator.",
+            "correct_fix": "if (count == 0) return 0;  // or return error",
+            "example_failure": "Input: total=10, count=0\\nOutput: crash/undefined\\nExpected: safe guard path",
+        }
+
+    if "arr[i+1]" in code_lower or "out-of-bounds" in expected_blob:
+        return {
+            "issue": "Out-of-bounds access at arr[i+1]",
+            "why_wrong": "At the last index, i + 1 is invalid and causes undefined behavior.",
+            "correct_fix": "for (size_t i = 0; i + 1 < arr.size(); ++i) { ... }",
+            "example_failure": "Input: [7]\\nOutput: invalid memory access\\nExpected: safe execution",
+        }
+
+    if "vector<int> arr" in code_lower and "const vector<int>&" not in code_lower:
+        return {
+            "issue": "Inefficient pass-by-value for vector parameter",
+            "why_wrong": "Copies the whole array and increases time/memory overhead.",
+            "correct_fix": "Use const vector<int>& arr in the function signature.",
+            "example_failure": "Input: 1,000,000 elements\\nOutput: unnecessary copy cost\\nExpected: reference-based access",
+        }
+
+    if "arr.front()" in code_lower or "arr.back()" in code_lower:
+        return {
+            "issue": "Missing empty-array guard before front/back access",
+            "why_wrong": "front()/back() on empty vectors is undefined behavior.",
+            "correct_fix": "if (arr.empty()) return <safe default>;",
+            "example_failure": "Input: []\\nOutput: undefined behavior\\nExpected: safe early return",
+        }
+
+    if "int total = 0" in code_lower and "+=" in code_lower:
+        return {
+            "issue": "Potential integer overflow in accumulation",
+            "why_wrong": "Large sums can exceed int limits and wrap around.",
+            "correct_fix": "Use long long total = 0;",
+            "example_failure": "Input: [1e9, 1e9, 1e9]\\nOutput: overflowed int\\nExpected: 3000000000",
+        }
+
+    issue = "-"
+    if task and getattr(task, "expected_issues", None):
+        issue = str(task.expected_issues[0])
+
+    return {
+        "issue": issue,
+        "why_wrong": "The submitted review missed or partially described the expected issue.",
+        "correct_fix": "Align fix directly with the detected root cause.",
+        "example_failure": "Use an edge-case input that deterministically reproduces the bug.",
+    }
+
+
+def _build_missed_insight_highlight(
+    mode: str,
+    code_input: str,
+    review_text: str,
+    ground_truth: dict[str, str],
+    issue_score: float,
+) -> dict[str, str | bool]:
+    """Highlight the strongest missed edge-case insight for judges."""
+    if mode == "hallucination":
+        return {
+            "active": False,
+            "text": "No critical missed insight detected yet.",
+            "implication": "edge-case coverage is currently acceptable",
+        }
+
+    issue_text = str((ground_truth or {}).get("issue", "")).lower()
+    code_lower = (code_input or "").lower()
+    review_lower = (review_text or "").lower()
+    missed_issue = float(issue_score) < 0.5
+
+    negative_markers = ("negative", "all negative", "mx = 0", "arr[0]", "initialization", "max value")
+    discusses_negative_case = any(marker in review_lower for marker in negative_markers)
+    max_init_case = ("mx = 0" in issue_text) or ("mx = 0" in code_lower) or ("int mx=0" in code_lower)
+
+    if max_init_case and (missed_issue or not discusses_negative_case):
+        return {
+            "active": True,
+            "text": "Agent failed to consider negative-only arrays",
+            "implication": "deep understanding of edge cases",
+        }
+
+    if missed_issue:
+        return {
+            "active": True,
+            "text": "Agent missed a key edge-case pathway during analysis",
+            "implication": "deeper boundary-focused reasoning is needed",
+        }
+
+    return {
+        "active": False,
+        "text": "No critical missed insight detected yet.",
+        "implication": "edge-case coverage is currently acceptable",
+    }
 
 
 def _score_standard_review(review: str, task: Task) -> dict[str, object]:
@@ -1968,6 +2477,14 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
             fields = _extract_agent_fields(review)
             reasoning_steps = _build_reasoning_steps(fields)
             hallucination_scores = _grade_hallucination_review(review)
+            ground_truth = _build_ground_truth_correction(task=None, code_input=code_input, mode="hallucination")
+            missed_insight = _build_missed_insight_highlight(
+                mode="hallucination",
+                code_input=code_input,
+                review_text=review,
+                ground_truth=ground_truth,
+                issue_score=float(hallucination_scores["issue_score"]),
+            )
             error_classification = _build_error_classification(
                 mode="hallucination",
                 code_input=code_input,
@@ -1989,6 +2506,8 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                     "reasoning_steps": reasoning_steps,
                     "full_review": review,
                 },
+                "ground_truth": ground_truth,
+                "missed_insight": missed_insight,
                 "grader_output": {
                     "issue_score": float(hallucination_scores["issue_score"]),
                     "fix_score": float(hallucination_scores["fix_score"]),
@@ -2006,6 +2525,12 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
         reset_result = env.reset(task_index=request.task_index)
         sampled_code = reset_result.observation.code
         code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else sampled_code
+        task_for_ground_truth = _match_task_by_code(
+            request.task_index,
+            code_input,
+            getattr(env, "_current_task", None),
+        )
+        ground_truth = _build_ground_truth_correction(task=task_for_ground_truth, code_input=code_input, mode="standard")
 
         raw_review = fallback_review(code_input)
         review = optimize_review_for_grader(raw_review, task_idx=request.task_index, code=code_input)
@@ -2015,10 +2540,17 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
         fields = _extract_agent_fields(review)
         reasoning_steps = _build_reasoning_steps(fields)
         reason_items = _build_reason_items(info)
+        missed_insight = _build_missed_insight_highlight(
+            mode="standard",
+            code_input=code_input,
+            review_text=review,
+            ground_truth=ground_truth,
+            issue_score=float(info.get("issue_score", 0.0)),
+        )
         error_classification = _build_error_classification(
             mode="standard",
             code_input=code_input,
-            expected_issue=" ".join(getattr(env.state, "expected_issues", []) or []),
+            expected_issue=" ".join(getattr(task_for_ground_truth, "expected_issues", []) or []),
             issue_score=float(info.get("issue_score", 0.0)),
             fix_score=float(info.get("fix_score", 0.0)),
             explanation_score=float(info.get("explanation_score", 0.0)),
@@ -2037,6 +2569,8 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                 "reasoning_steps": reasoning_steps,
                 "full_review": review,
             },
+            "ground_truth": ground_truth,
+            "missed_insight": missed_insight,
             "grader_output": {
                 "issue_score": float(info.get("issue_score", 0.0)),
                 "fix_score": float(info.get("fix_score", 0.0)),
