@@ -531,12 +531,12 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 <h3>Judge Scorecard</h3>
                 <pre id="scorecardText">No scorecard yet. Run evaluation or Final Judge Run.</pre>
             </div>
-            <details>
+            <details id="benchmarkReplayDetails">
                 <summary>Benchmark & Replay Logs ▼</summary>
                 <pre id="comparisonText">No model comparison run yet.</pre>
                 <pre id="replayLog" style="margin-top: 10px;">No replay run yet.</pre>
             </details>
-            <details>
+            <details id="adversarialDetails">
                 <summary>Adversarial Test Generator ▼</summary>
                 <pre id="adversarialText">No adversarial tests generated yet.</pre>
             </details>
@@ -581,6 +581,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const halluBadgeEl = document.getElementById("halluBadge");
         const comparisonTextEl = document.getElementById("comparisonText");
         const adversarialTextEl = document.getElementById("adversarialText");
+        const benchmarkReplayDetailsEl = document.getElementById("benchmarkReplayDetails");
+        const adversarialDetailsEl = document.getElementById("adversarialDetails");
         const errorDistTextEl = document.getElementById("errorDistText");
         const rewardVizTextEl = document.getElementById("rewardVizText");
         const jsonLogsTextEl = document.getElementById("jsonLogsText");
@@ -1094,12 +1096,30 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 if (!response.ok) throw new Error("demo evaluate failed");
                 const data = await response.json();
                 cacheEvaluationResult(cacheKey, data);
-                return applyEvaluationData(data, { silent, mode, fromCache: false });
+                const applied = applyEvaluationData(data, { silent, mode, fromCache: false });
+                if (!silent) {
+                    await refreshSupportPanelsAfterEvaluation(data, {
+                        mode,
+                        taskIndex,
+                        codeInput,
+                        forceFalsePositive,
+                    });
+                }
+                return applied;
             } catch (err) {
                 if (useFailsafe) {
                     const cached = getCachedEvaluation(cacheKey);
                     if (cached) {
-                        return applyEvaluationData(cached, { silent, mode, fromCache: true });
+                        const applied = applyEvaluationData(cached, { silent, mode, fromCache: true });
+                        if (!silent) {
+                            await refreshSupportPanelsAfterEvaluation(cached, {
+                                mode,
+                                taskIndex,
+                                codeInput,
+                                forceFalsePositive,
+                            });
+                        }
+                        return applied;
                     }
                 }
                 if (!silent) {
@@ -1178,18 +1198,67 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             setBusy(false);
         }
 
-        async function runModelComparison() {
-            const mode = isHallucinationMode() ? "hallucination" : "standard";
-            const taskIndex = mode === "hallucination" ? 0 : Number(taskIndexEl.value);
-            const codeInput = String(codeInputEl.value || "");
-            const forceFalsePositive = Boolean(falsePositiveToggleEl.checked);
+        const buildReplaySnapshot = (data) => {
+            const grader = data && data.grader_output ? data.grader_output : {};
+            const variant = String((data && data.variant) || "-");
+            const finalScore = Number((grader.total_score ?? grader.final_score) || 0);
+            return [
+                "Latest Replay Snapshot",
+                `Variant: ${variant}`,
+                `Score: ${finalScore.toFixed(2)}`,
+                `Issue/Fix/Explanation: ${Number(grader.issue_score || 0).toFixed(2)} / ${Number(grader.fix_score || 0).toFixed(2)} / ${Number(grader.explanation_score || 0).toFixed(2)}`,
+                `Source: ${String((lastScorecardReport && lastScorecardReport.source) || "live")}`,
+            ].join("\n");
+        };
+
+        async function refreshSupportPanelsAfterEvaluation(data, context = {}) {
+            const mode = String(context.mode || (isHallucinationMode() ? "hallucination" : "standard"));
+            const taskIndex = Number(context.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
+            const codeInput = String(context.codeInput ?? codeInputEl.value ?? "");
+            const forceFalsePositive = Boolean(context.forceFalsePositive ?? falsePositiveToggleEl.checked);
+
+            replayLogEl.textContent = buildReplaySnapshot(data);
+
+            await runModelComparison({
+                mode,
+                taskIndex,
+                codeInput,
+                forceFalsePositive,
+                silent: true,
+            });
+
+            await runAdversarialTests({
+                mode,
+                taskIndex,
+                codeInput,
+                silent: true,
+            });
+
+            if (benchmarkReplayDetailsEl) {
+                benchmarkReplayDetailsEl.open = true;
+            }
+            if (adversarialDetailsEl) {
+                adversarialDetailsEl.open = true;
+            }
+        }
+
+        async function runModelComparison(options = {}) {
+            const mode = String(options.mode ?? (isHallucinationMode() ? "hallucination" : "standard"));
+            const taskIndex = Number(options.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
+            const codeInput = String(options.codeInput ?? codeInputEl.value ?? "");
+            const forceFalsePositive = Boolean(options.forceFalsePositive ?? falsePositiveToggleEl.checked);
+            const silent = Boolean(options.silent);
             if (!codeInput.trim()) {
-                statusEl.textContent = "Please provide code input before comparison.";
+                if (!silent) {
+                    statusEl.textContent = "Please provide code input before comparison.";
+                }
                 return;
             }
 
-            statusEl.textContent = "Running model comparison...";
-            setBusy(true);
+            if (!silent) {
+                statusEl.textContent = "Running model comparison...";
+                setBusy(true);
+            }
             try {
                 const response = await fetch("/demo/compare", {
                     method: "POST",
@@ -1206,7 +1275,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 const rows = Array.isArray(data.results) ? data.results : [];
                 if (rows.length === 0) {
                     comparisonTextEl.textContent = "No comparison results available.";
-                    statusEl.textContent = "Comparison completed with no rows.";
+                    if (!silent) {
+                        statusEl.textContent = "Comparison completed with no rows.";
+                    }
                     return;
                 }
 
@@ -1219,11 +1290,19 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     lines.push(`${row.model} -> ${Number(row.final_score || 0).toFixed(2)}${winnerTag}`);
                 }
                 comparisonTextEl.textContent = lines.join("\n");
-                statusEl.textContent = "Model comparison complete.";
+                if (!silent) {
+                    statusEl.textContent = "Model comparison complete.";
+                }
+                return data;
             } catch (err) {
-                statusEl.textContent = "Model comparison failed. Check server logs.";
+                if (!silent) {
+                    statusEl.textContent = "Model comparison failed. Check server logs.";
+                }
+                return null;
             } finally {
-                setBusy(false);
+                if (!silent) {
+                    setBusy(false);
+                }
             }
         }
 
