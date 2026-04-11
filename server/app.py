@@ -946,10 +946,15 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             scoreFillEl.style.width = `${Math.max(0, Math.min(1, finalScore)) * 100}%`;
             rewardVizTextEl.textContent = renderRewardVisualization(grader);
             whyScoreTextEl.textContent = renderReasonItems(grader.reason_items || []);
-            feedbackTextEl.textContent = grader.feedback || "No feedback returned.";
+            const mismatchState = data.mismatch_detection || grader.mismatch_detection || {};
+            const mismatchDetected = Boolean(mismatchState.detected);
+            const hallucinationDetected = Boolean(grader.hallucination_detected);
+            const reliabilityLow = hallucinationDetected || mismatchDetected;
+            const reliabilityPrefix = reliabilityLow ? "🔒 Reliability: LOW\n\n" : "";
+            feedbackTextEl.textContent = `${reliabilityPrefix}${grader.feedback || "No feedback returned."}`;
             groundTruthTextEl.textContent = renderGroundTruth(data.ground_truth || {});
             missedInsightTextEl.textContent = renderMissedInsight(data.missed_insight || {});
-            mismatchDetectionTextEl.textContent = renderMismatchDetection(data.mismatch_detection || grader.mismatch_detection || {});
+            mismatchDetectionTextEl.textContent = renderMismatchDetection(mismatchState);
 
             if (!fromCache) {
                 const classification = grader.error_classification || {};
@@ -966,10 +971,19 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 renderErrorDashboard();
             }
 
-            const hallucinationDetected = Boolean(grader.hallucination_detected);
-            if (hallucinationDetected) {
+            if (reliabilityLow) {
                 const penaltyValue = Number(grader.penalty_applied || 0);
-                hallucinationAlertEl.textContent = `🚨 Hallucination Detected\n❌ False issue identified\nPenalty applied: -${penaltyValue.toFixed(1)}`;
+                const alertLines = [];
+                if (hallucinationDetected) {
+                    alertLines.push("🚨 False Issue Detected (Hallucination)");
+                    alertLines.push("❌ False issue identified");
+                    alertLines.push(`Penalty applied: -${penaltyValue.toFixed(1)}`);
+                }
+                if (!hallucinationDetected && mismatchDetected) {
+                    alertLines.push("🚨 Issue Mapping Mismatch Detected");
+                }
+                alertLines.push("🔒 Reliability: LOW");
+                hallucinationAlertEl.textContent = alertLines.join("\n");
                 hallucinationAlertEl.classList.add("show");
             } else {
                 hallucinationAlertEl.classList.remove("show");
@@ -1533,7 +1547,7 @@ def _grade_hallucination_review(review: str) -> dict[str, object]:
         },
         {
             "ok": explanation_ok,
-            "message": "Explanation matches simple addition behavior" if explanation_ok else "Explanation does not justify the no-bug decision",
+            "message": "Explanation matches simple addition behavior" if explanation_ok else "Explanation contradicts ground truth (no issue present)",
         },
         {
             "ok": not false_positive,
