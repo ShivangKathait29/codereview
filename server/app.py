@@ -434,7 +434,6 @@ DEMO_PAGE_HTML = r"""
                     </div>
                     <textarea id="codeInput" placeholder="Paste code here..."></textarea>
                     <div class="sub-controls">
-                        <button id="compareBtn">Run Model Comparison</button>
                         <button id="judgeDemoBtn" class="primary">Judge Demo Mode ⚡</button>
                         <button id="finalJudgeRunBtn" class="primary">Final Judge Run 🏁</button>
                         <button id="adversarialBtn">Generate Adversarial Tests 🧪</button>
@@ -528,10 +527,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 <h3>Judge Scorecard</h3>
                 <pre id="scorecardText">No scorecard yet. Run evaluation or Final Judge Run.</pre>
             </div>
-            <div class="panel" style="margin-top: 10px;">
-                <h3>Model Comparison</h3>
-                <pre id="comparisonText">No model comparison run yet.</pre>
-            </div>
             <details id="adversarialDetails">
                 <summary>Adversarial Test Generator ▼</summary>
                 <pre id="adversarialText">No adversarial tests generated yet.</pre>
@@ -546,7 +541,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const codeInputEl = document.getElementById("codeInput");
         const loadBtn = document.getElementById("loadBtn");
         const runBtn = document.getElementById("runBtn");
-        const compareBtn = document.getElementById("compareBtn");
         const judgeDemoBtn = document.getElementById("judgeDemoBtn");
         const finalJudgeRunBtn = document.getElementById("finalJudgeRunBtn");
         const adversarialBtn = document.getElementById("adversarialBtn");
@@ -572,7 +566,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const mismatchDetectionTextEl = document.getElementById("mismatchDetectionText");
         const hallucinationAlertEl = document.getElementById("hallucinationAlert");
         const halluBadgeEl = document.getElementById("halluBadge");
-        const comparisonTextEl = document.getElementById("comparisonText");
         const adversarialTextEl = document.getElementById("adversarialText");
         const adversarialDetailsEl = document.getElementById("adversarialDetails");
         const errorDistTextEl = document.getElementById("errorDistText");
@@ -606,8 +599,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             "hallucinations",
             "fix_errors",
         ];
-
-        const HALLUCINATION_LABEL = "Task 4 — Hallucination Detection";
         const isHallucinationMode = () => modeSelectEl.value === "hallucination";
 
         const syncModeUI = () => {
@@ -627,7 +618,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             languageSelectEl.disabled = busy;
             loadBtn.disabled = busy;
             runBtn.disabled = busy;
-            compareBtn.disabled = busy;
             judgeDemoBtn.disabled = busy;
             finalJudgeRunBtn.disabled = busy;
             adversarialBtn.disabled = busy;
@@ -910,7 +900,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     "Judge Scorecard (Final Judge Run)",
                     `Generated: ${String(scorecard.generated_at || "-")}`,
                     `Average Score: ${Number(scorecard.average_score || 0).toFixed(2)}`,
-                    `Benchmark Leader: ${String(scorecard.benchmark_leader || "-")}`,
                     "",
                 ];
                 for (const run of scorecard.runs) {
@@ -1127,14 +1116,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             const codeInput = String(context.codeInput ?? codeInputEl.value ?? "");
             const forceFalsePositive = Boolean(context.forceFalsePositive ?? falsePositiveToggleEl.checked);
 
-            await runModelComparison({
-                mode,
-                taskIndex,
-                codeInput,
-                forceFalsePositive,
-                silent: true,
-            });
-
             await runAdversarialTests({
                 mode,
                 taskIndex,
@@ -1143,70 +1124,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             });
             if (adversarialDetailsEl) {
                 adversarialDetailsEl.open = true;
-            }
-        }
-
-        async function runModelComparison(options = {}) {
-            const mode = String(options.mode ?? (isHallucinationMode() ? "hallucination" : "standard"));
-            const taskIndex = Number(options.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
-            const codeInput = String(options.codeInput ?? codeInputEl.value ?? "");
-            const forceFalsePositive = Boolean(options.forceFalsePositive ?? falsePositiveToggleEl.checked);
-            const silent = Boolean(options.silent);
-            if (!codeInput.trim()) {
-                if (!silent) {
-                    statusEl.textContent = "Please provide code input before comparison.";
-                }
-                return;
-            }
-
-            if (!silent) {
-                statusEl.textContent = "Running model comparison...";
-                setBusy(true);
-            }
-            try {
-                const response = await fetch("/demo/compare", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        task_index: taskIndex,
-                        code_input: codeInput,
-                        mode,
-                        force_false_positive: forceFalsePositive,
-                    }),
-                });
-                if (!response.ok) throw new Error("comparison request failed");
-                const data = await response.json();
-                const rows = Array.isArray(data.results) ? data.results : [];
-                if (rows.length === 0) {
-                    comparisonTextEl.textContent = "No comparison results available.";
-                    if (!silent) {
-                        statusEl.textContent = "Comparison completed with no rows.";
-                    }
-                    return;
-                }
-
-                const lines = [
-                    `${data.mode === "hallucination" ? HALLUCINATION_LABEL : TASK_LABELS[taskIndex]} | ${data.variant || ""}`,
-                    "",
-                ];
-                for (const row of rows) {
-                    const winnerTag = row.is_winner ? " [WINNER]" : "";
-                    lines.push(`${row.model} -> ${Number(row.final_score || 0).toFixed(2)}${winnerTag}`);
-                }
-                comparisonTextEl.textContent = lines.join("\n");
-                if (!silent) {
-                    statusEl.textContent = "Model comparison complete.";
-                }
-                return data;
-            } catch (err) {
-                if (!silent) {
-                    statusEl.textContent = "Model comparison failed. Check server logs.";
-                }
-                return null;
-            } finally {
-                if (!silent) {
-                    setBusy(false);
-                }
             }
         }
 
@@ -1349,10 +1266,10 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 const testCount = Array.isArray(adversarialData && adversarialData.tests) ? adversarialData.tests.length : 0;
                 logLines.push(`3) Adversarial generator produced ${testCount} test(s).`);
 
-                comparisonTextEl.textContent = logLines.join("\n");
+                scorecardTextEl.textContent = logLines.join("\n");
                 statusEl.textContent = "Judge demo sequence complete.";
             } catch (err) {
-                comparisonTextEl.textContent = logLines.concat(["", "Sequence interrupted by an error."]).join("\n");
+                scorecardTextEl.textContent = logLines.concat(["", "Sequence interrupted by an error."]).join("\n");
                 statusEl.textContent = "Judge demo sequence failed. Check server logs.";
             } finally {
                 falsePositiveToggleEl.checked = false;
@@ -1433,8 +1350,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 } else {
                     logLines.push("3) Hallucination trap failed.");
                 }
-                const benchmarkLeader = "N/A";
-
                 const validScores = runRows.map((x) => Number(x.final_score || 0));
                 const averageScore = validScores.length > 0
                     ? validScores.reduce((a, b) => a + b, 0) / validScores.length
@@ -1446,15 +1361,13 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                     type: "final-judge-run",
                     generated_at: new Date().toISOString(),
                     average_score: averageScore,
-                    benchmark_leader: benchmarkLeader,
                     runs: runRows,
                 };
                 scorecardTextEl.textContent = renderScorecard(lastScorecardReport);
                 downloadScorecardBtn.disabled = !lastScorecardReport;
-                comparisonTextEl.textContent = logLines.join("\n");
                 statusEl.textContent = "Final Judge Run complete.";
             } catch (err) {
-                comparisonTextEl.textContent = logLines.concat(["", "Final Judge Run interrupted by an error."]).join("\n");
+                scorecardTextEl.textContent = logLines.concat(["", "Final Judge Run interrupted by an error."]).join("\n");
                 statusEl.textContent = "Final Judge Run failed. Check server logs.";
             } finally {
                 falsePositiveToggleEl.checked = false;
@@ -1485,7 +1398,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
 
         loadBtn.addEventListener("click", loadSample);
         runBtn.addEventListener("click", runEvaluation);
-        compareBtn.addEventListener("click", runModelComparison);
         judgeDemoBtn.addEventListener("click", runJudgeDemoMode);
         finalJudgeRunBtn.addEventListener("click", runFinalJudgeRun);
         adversarialBtn.addEventListener("click", runAdversarialTests);
@@ -2084,267 +1996,6 @@ def _score_standard_review(review: str, task: Task) -> dict[str, object]:
     }
 
 
-def _build_standard_model_reviews(code_input: str, task_index: int) -> dict[str, str]:
-    """Build comparable simulated model outputs for benchmark leaderboard."""
-    code_lower = code_input.lower()
-    if task_index == 0:
-        if "count == 0" in code_lower:
-            gpt4_review = _compose_structured_review(
-                issue="No division-by-zero bug exists because count is already checked.",
-                fix="Optional: return an error code for clearer API behavior.",
-                explanation="The function is valid and robust.",
-            )
-            llama_review = _compose_structured_review(
-                issue="No bug found; count check is present.",
-                fix="No changes.",
-                explanation="Looks fine.",
-            )
-        else:
-            gpt4_review = _compose_structured_review(
-                issue="Division by zero can occur when count is zero.",
-                fix="Add a guard check before dividing.",
-                explanation="This is unsafe for invalid input.",
-            )
-            llama_review = _compose_structured_review(
-                issue="There is a division by zero risk.",
-                fix="Consider validating inputs.",
-                explanation="Might break in some cases.",
-            )
-    elif task_index == 1:
-        if "vector<int> arr" in code_lower and "const vector<int>&" not in code_lower:
-            gpt4_review = _compose_structured_review(
-                issue="Pass-by-value introduces unnecessary copy overhead.",
-                fix="Use const vector<int>& in the signature.",
-                explanation="This improves performance and memory usage.",
-            )
-            llama_review = _compose_structured_review(
-                issue="The function copies data due to pass by value.",
-                fix="Check function signature.",
-                explanation="Could be slower.",
-            )
-        else:
-            gpt4_review = _compose_structured_review(
-                issue="Nested lookups make this quadratic in practice.",
-                fix="Use std::unordered_set for membership checks.",
-                explanation="This improves throughput for larger inputs.",
-            )
-            llama_review = _compose_structured_review(
-                issue="This appears to be quadratic and slow.",
-                fix="Try optimizing loops.",
-                explanation="May be expensive.",
-            )
-    else:
-        if "arr[i+1]" in code_lower:
-            gpt4_review = _compose_structured_review(
-                issue="Out-of-bounds access can happen at arr[i+1].",
-                fix="Change loop bound to i + 1 < arr.size().",
-                explanation="Prevents undefined behavior at boundaries.",
-            )
-            llama_review = _compose_structured_review(
-                issue="Potential out-of-bounds access.",
-                fix="Adjust loop condition.",
-                explanation="Could crash.",
-            )
-        elif "arr.front()" in code_lower or "arr.back()" in code_lower:
-            gpt4_review = _compose_structured_review(
-                issue="arr.front()/arr.back() can be invalid when there are no elements.",
-                fix="Add if(arr.empty()) guard before reading front/back.",
-                explanation="Avoids undefined behavior.",
-            )
-            llama_review = _compose_structured_review(
-                issue="front/back usage may be unsafe.",
-                fix="Add a guard.",
-                explanation="Needs defensive checks.",
-            )
-        else:
-            gpt4_review = _compose_structured_review(
-                issue="Integer overflow risk exists due to int total accumulation.",
-                fix="Use long long total (or size_t) to store sums.",
-                explanation="This avoids truncation issues.",
-            )
-            llama_review = _compose_structured_review(
-                issue="Potential overflow in accumulation.",
-                fix="Use a larger type.",
-                explanation="Could wrap values.",
-            )
-
-    gpt4_raw = fallback_review(code_input)
-    your_agent_review = optimize_review_for_grader(gpt4_raw, task_idx=task_index, code=code_input)
-
-    return {
-        "GPT-4": gpt4_review,
-        "LLaMA": llama_review,
-        "Your Agent": your_agent_review,
-    }
-
-
-def _build_hallucination_model_reviews(force_false_positive: bool) -> dict[str, str]:
-    """Build model outputs for hallucination benchmark mode."""
-    gpt4_review = _compose_structured_review(
-        issue="None",
-        fix="Consider comments for readability.",
-        explanation="This is a simple a + b return path.",
-    )
-
-    llama_review = _compose_structured_review(
-        issue="Possible overflow when adding two integers.",
-        fix="Use long long and check limits.",
-        explanation="Overflow may occur at integer boundaries.",
-    )
-
-    your_agent_review = _compose_structured_review(
-        issue="None",
-        fix="No fix needed.",
-        explanation="This function is straightforward and directly returns a + b.",
-    )
-
-    if force_false_positive:
-        your_agent_review = _compose_structured_review(
-            issue="Possible overflow when adding two integers.",
-            fix="Use long long and add overflow checks.",
-            explanation="Potential boundary overflow.",
-        )
-
-    return {
-        "GPT-4": gpt4_review,
-        "LLaMA": llama_review,
-        "Your Agent": your_agent_review,
-    }
-
-
-def _format_benchmark_table(summary_rows: list[dict[str, object]]) -> str:
-    """Render a compact benchmark table for demos and exports."""
-    if not summary_rows:
-        return "No benchmark data available."
-
-    model_width = max(len("Model"), max(len(str(r.get("model", ""))) for r in summary_rows))
-    lines = [
-        "Benchmark Report (Fixed Suite)",
-        "",
-        f"{'Model'.ljust(model_width)} | Avg Score | Wins | Hallucination FP Rate",
-        f"{'-' * model_width}-+-----------+------+----------------------",
-    ]
-    for row in summary_rows:
-        model = str(row.get("model", ""))
-        avg_score = float(row.get("avg_score", 0.0))
-        wins = int(row.get("wins", 0))
-        scenarios = int(row.get("scenarios", 0))
-        fp_rate_pct = float(row.get("hallucination_false_positive_rate", 0.0)) * 100.0
-        lines.append(
-            f"{model.ljust(model_width)} | {avg_score:>9.2f} | {wins:>2}/{scenarios:<2} | {fp_rate_pct:>19.1f}%"
-        )
-    return "\n".join(lines)
-
-
-def _run_benchmark_suite() -> dict[str, object]:
-    """Run a deterministic multi-scenario benchmark and return report + table."""
-    model_names = ["GPT-4", "LLaMA", "Your Agent"]
-    per_model: dict[str, dict[str, float | int]] = {
-        name: {
-            "total_score": 0.0,
-            "wins": 0,
-            "scenarios": 0,
-            "hallucination_runs": 0,
-            "hallucination_false_positives": 0,
-        }
-        for name in model_names
-    }
-    scenario_rows: list[dict[str, object]] = []
-
-    # Standard deterministic scenarios (first variant of each task family).
-    for task_idx in range(3):
-        task = TASKS[task_idx][0]
-        code_input = task.code
-        model_reviews = _build_standard_model_reviews(code_input, task_idx)
-        scenario_scores: dict[str, float] = {}
-
-        for model_name in model_names:
-            review = model_reviews[model_name]
-            scored = _score_standard_review(review, task)
-            final_score = float(scored.get("final_score", 0.0))
-            scenario_scores[model_name] = final_score
-
-            stats = per_model[model_name]
-            stats["total_score"] = float(stats["total_score"]) + final_score
-            stats["scenarios"] = int(stats["scenarios"]) + 1
-
-            scenario_rows.append(
-                {
-                    "scenario": f"Task {task_idx + 1}: {task.title}",
-                    "mode": "standard",
-                    "model": model_name,
-                    "final_score": final_score,
-                }
-            )
-
-        best_score = max(scenario_scores.values()) if scenario_scores else 0.0
-        for model_name, score in scenario_scores.items():
-            if score == best_score:
-                per_model[model_name]["wins"] = int(per_model[model_name]["wins"]) + 1
-
-    # Hallucination scenario.
-    hallucination_reviews = _build_hallucination_model_reviews(force_false_positive=False)
-    scenario_scores: dict[str, float] = {}
-    for model_name in model_names:
-        review = hallucination_reviews[model_name]
-        scored = _grade_hallucination_review(review)
-        final_score = float(scored.get("total_score", scored.get("final_score", 0.0)))
-        false_positive = bool(scored.get("hallucination_detected", False))
-        scenario_scores[model_name] = final_score
-
-        stats = per_model[model_name]
-        stats["total_score"] = float(stats["total_score"]) + final_score
-        stats["scenarios"] = int(stats["scenarios"]) + 1
-        stats["hallucination_runs"] = int(stats["hallucination_runs"]) + 1
-        if false_positive:
-            stats["hallucination_false_positives"] = int(stats["hallucination_false_positives"]) + 1
-
-        scenario_rows.append(
-            {
-                "scenario": "Hallucination Detection (No Bug)",
-                "mode": "hallucination",
-                "model": model_name,
-                "final_score": final_score,
-                "api_adjusted_final_score": float(scored.get("final_score", final_score)),
-                "hallucination_detected": false_positive,
-            }
-        )
-
-    best_score = max(scenario_scores.values()) if scenario_scores else 0.0
-    for model_name, score in scenario_scores.items():
-        if score == best_score:
-            per_model[model_name]["wins"] = int(per_model[model_name]["wins"]) + 1
-
-    summary_rows: list[dict[str, object]] = []
-    for model_name in model_names:
-        stats = per_model[model_name]
-        scenarios = max(1, int(stats["scenarios"]))
-        hallu_runs = max(1, int(stats["hallucination_runs"]))
-        summary_rows.append(
-            {
-                "model": model_name,
-                "avg_score": float(stats["total_score"]) / scenarios,
-                "wins": int(stats["wins"]),
-                "scenarios": int(stats["scenarios"]),
-                "hallucination_false_positive_rate": float(stats["hallucination_false_positives"]) / hallu_runs,
-            }
-        )
-
-    summary_rows = sorted(
-        summary_rows,
-        key=lambda row: (float(row["avg_score"]), int(row["wins"])),
-        reverse=True,
-    )
-    table = _format_benchmark_table(summary_rows)
-    return {
-        "generated_at": f"{datetime.utcnow().isoformat()}Z",
-        "suite": "fixed-deterministic-4-scenario",
-        "summary_rows": summary_rows,
-        "scenario_rows": scenario_rows,
-        "table": table,
-    }
-
-
 def _extract_function_name(code_input: str) -> str:
     """Best-effort function name extraction from C/C++ style snippets."""
     match = re.search(r"\b[A-Za-z_][\w:<>&\*\s]*\s+([A-Za-z_]\w*)\s*\([^\)]*\)\s*\{", code_input)
@@ -2469,7 +2120,7 @@ def _generate_adversarial_tests(code_input: str) -> dict[str, object]:
             "summary": "Boundary index adversarial case generated for last-element access.",
         }
 
-    # Safe-code sanity test fallback (still useful benchmark output).
+    # Safe-code sanity test fallback for non-risky snippets.
     tests.append(
         {
             "name": "Test 1",
@@ -2733,69 +2384,6 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/demo/compare", summary="Run model comparison leaderboard")
-async def demo_compare(request: DemoEvaluateRequest) -> dict:
-    """Compare multiple model profiles on the same task instance."""
-    try:
-        mode = (request.mode or "standard").strip().lower()
-        results: list[dict[str, object]] = []
-
-        if mode == "hallucination":
-            code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else HALLUCINATION_SAFE_CODE
-            model_reviews = _build_hallucination_model_reviews(force_false_positive=request.force_false_positive)
-            for model_name, review in model_reviews.items():
-                scored = _grade_hallucination_review(review)
-                results.append(
-                    {
-                        "model": model_name,
-                        "issue_score": float(scored["issue_score"]),
-                        "fix_score": float(scored["fix_score"]),
-                        "explanation_score": float(scored["explanation_score"]),
-                        "final_score": float(scored.get("total_score", scored["final_score"])),
-                        "api_adjusted_final_score": float(scored["final_score"]),
-                        "review": review,
-                    }
-                )
-            variant_name = "Hallucination Detection (No Bug)"
-            task_id = 3
-        else:
-            reset_result = env.reset(task_index=request.task_index)
-            sampled_code = reset_result.observation.code
-            code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else sampled_code
-            current_task = env._current_task
-            task = _match_task_by_code(request.task_index, code_input, current_task)
-            model_reviews = _build_standard_model_reviews(code_input, request.task_index)
-            for model_name, review in model_reviews.items():
-                scored = _score_standard_review(review, task)
-                results.append(
-                    {
-                        "model": model_name,
-                        "issue_score": float(scored["issue_score"]),
-                        "fix_score": float(scored["fix_score"]),
-                        "explanation_score": float(scored["explanation_score"]),
-                        "final_score": float(scored["final_score"]),
-                        "review": review,
-                    }
-                )
-            variant_name = task.title
-            task_id = int(request.task_index)
-
-        ranked = sorted(results, key=lambda x: float(x["final_score"]), reverse=True)
-        best_score = float(ranked[0]["final_score"]) if ranked else 0.0
-        for row in ranked:
-            row["is_winner"] = float(row["final_score"]) == best_score
-
-        return {
-            "mode": mode,
-            "task_index": task_id,
-            "variant": variant_name,
-            "code_input": code_input,
-            "results": ranked,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.post("/demo/adversarial", summary="Generate adversarial tests")
 async def demo_adversarial(request: DemoEvaluateRequest) -> dict:
     """Generate adversarial inputs and control tests from a code snippet."""
@@ -2825,30 +2413,6 @@ async def demo_adversarial(request: DemoEvaluateRequest) -> dict:
             "tests": generated.get("tests", []),
             "reasons": generated.get("reasons", []),
             "summary": generated.get("summary", ""),
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/demo/benchmark-report", summary="Generate benchmark report")
-async def demo_benchmark_report() -> dict:
-    """Return benchmark report JSON with summary rows and scenario details."""
-    try:
-        return _run_benchmark_suite()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/demo/benchmark-table", summary="Generate benchmark table")
-async def demo_benchmark_table() -> dict:
-    """Return a compact benchmark table payload for quick rendering."""
-    try:
-        report = _run_benchmark_suite()
-        return {
-            "generated_at": report.get("generated_at"),
-            "suite": report.get("suite"),
-            "summary_rows": report.get("summary_rows", []),
-            "table": report.get("table", ""),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
