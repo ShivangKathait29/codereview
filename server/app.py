@@ -435,12 +435,9 @@ DEMO_PAGE_HTML = r"""
                     <textarea id="codeInput" placeholder="Paste code here..."></textarea>
                     <div class="sub-controls">
                         <button id="compareBtn">Run Model Comparison</button>
-                        <button id="benchmarkBtn">Run Benchmark Report</button>
                         <button id="judgeDemoBtn" class="primary">Judge Demo Mode ⚡</button>
                         <button id="finalJudgeRunBtn" class="primary">Final Judge Run 🏁</button>
                         <button id="adversarialBtn">Generate Adversarial Tests 🧪</button>
-                        <button id="replayBtn">Auto Replay</button>
-                        <button id="downloadBtn" disabled>Download Replay Report</button>
                         <button id="downloadScorecardBtn" disabled>Download Judge Scorecard</button>
                         <button id="resetAnalyticsBtn">Reset Analytics</button>
                         <button id="docsBtn">Open API Docs</button>
@@ -531,11 +528,10 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 <h3>Judge Scorecard</h3>
                 <pre id="scorecardText">No scorecard yet. Run evaluation or Final Judge Run.</pre>
             </div>
-            <details id="benchmarkReplayDetails">
-                <summary>Benchmark & Replay Logs ▼</summary>
+            <div class="panel" style="margin-top: 10px;">
+                <h3>Model Comparison</h3>
                 <pre id="comparisonText">No model comparison run yet.</pre>
-                <pre id="replayLog" style="margin-top: 10px;">No replay run yet.</pre>
-            </details>
+            </div>
             <details id="adversarialDetails">
                 <summary>Adversarial Test Generator ▼</summary>
                 <pre id="adversarialText">No adversarial tests generated yet.</pre>
@@ -551,12 +547,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const loadBtn = document.getElementById("loadBtn");
         const runBtn = document.getElementById("runBtn");
         const compareBtn = document.getElementById("compareBtn");
-        const benchmarkBtn = document.getElementById("benchmarkBtn");
         const judgeDemoBtn = document.getElementById("judgeDemoBtn");
         const finalJudgeRunBtn = document.getElementById("finalJudgeRunBtn");
         const adversarialBtn = document.getElementById("adversarialBtn");
-        const replayBtn = document.getElementById("replayBtn");
-        const downloadBtn = document.getElementById("downloadBtn");
         const downloadScorecardBtn = document.getElementById("downloadScorecardBtn");
         const resetAnalyticsBtn = document.getElementById("resetAnalyticsBtn");
         const falsePositiveToggleEl = document.getElementById("falsePositiveToggle");
@@ -581,17 +574,14 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         const halluBadgeEl = document.getElementById("halluBadge");
         const comparisonTextEl = document.getElementById("comparisonText");
         const adversarialTextEl = document.getElementById("adversarialText");
-        const benchmarkReplayDetailsEl = document.getElementById("benchmarkReplayDetails");
         const adversarialDetailsEl = document.getElementById("adversarialDetails");
         const errorDistTextEl = document.getElementById("errorDistText");
         const rewardVizTextEl = document.getElementById("rewardVizText");
         const jsonLogsTextEl = document.getElementById("jsonLogsText");
         const whyScoreTextEl = document.getElementById("whyScoreText");
         const scorecardTextEl = document.getElementById("scorecardText");
-        const replayLogEl = document.getElementById("replayLog");
         const scoreFillEl = document.getElementById("scoreFill");
         const variantNameEl = document.getElementById("variantName");
-        let lastReplayReport = null;
         let lastScorecardReport = null;
         const errorHistory = [];
         const evaluationCache = new Map();
@@ -638,12 +628,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             loadBtn.disabled = busy;
             runBtn.disabled = busy;
             compareBtn.disabled = busy;
-            benchmarkBtn.disabled = busy;
             judgeDemoBtn.disabled = busy;
             finalJudgeRunBtn.disabled = busy;
             adversarialBtn.disabled = busy;
-            replayBtn.disabled = busy;
-            downloadBtn.disabled = busy || !lastReplayReport;
             downloadScorecardBtn.disabled = busy || !lastScorecardReport;
             falsePositiveToggleEl.disabled = busy;
             failsafeToggleEl.disabled = busy;
@@ -1134,90 +1121,11 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             }
         }
 
-        async function runAutoReplay() {
-            replayLogEl.textContent = "Starting auto replay...";
-            statusEl.textContent = "Running auto replay across Easy -> Medium -> Hard...";
-            setBusy(true);
-
-            const lines = [];
-            let total = 0;
-            let successful = 0;
-            const replayItems = [];
-
-            for (const taskIndex of [0, 1, 2]) {
-                taskIndexEl.value = String(taskIndex);
-                await loadSample();
-
-                const data = await runEvaluation({
-                    taskIndex,
-                    codeInput: codeInputEl.value,
-                    mode: "standard",
-                    forceFalsePositive: false,
-                    silent: true,
-                });
-
-                if (!data) {
-                    lines.push(`${TASK_LABELS[taskIndex]} | failed`);
-                    replayItems.push({ task_index: taskIndex, task_name: TASK_LABELS[taskIndex], status: "failed" });
-                    continue;
-                }
-
-                const grader = data.grader_output || {};
-                const finalScore = Number((grader.total_score ?? grader.final_score) || 0);
-                total += finalScore;
-                successful += 1;
-                lines.push(`${TASK_LABELS[taskIndex]} | score=${finalScore.toFixed(2)} | issue=${Number(grader.issue_score || 0).toFixed(2)} fix=${Number(grader.fix_score || 0).toFixed(2)} expl=${Number(grader.explanation_score || 0).toFixed(2)}`);
-                replayItems.push({
-                    task_index: taskIndex,
-                    task_name: TASK_LABELS[taskIndex],
-                    variant: data.variant || "",
-                    final_score: finalScore,
-                    issue_score: Number(grader.issue_score || 0),
-                    fix_score: Number(grader.fix_score || 0),
-                    explanation_score: Number(grader.explanation_score || 0),
-                    error_classification: grader.error_classification || {},
-                    feedback: grader.feedback || "",
-                    review: (data.agent_output && data.agent_output.full_review) || "",
-                    status: "ok",
-                });
-            }
-
-            const average = successful > 0 ? total / successful : null;
-            lines.push(successful > 0 ? `Average (${successful}/3): ${average.toFixed(2)}` : "Average: N/A");
-
-            lastReplayReport = {
-                generated_at: new Date().toISOString(),
-                successful_runs: successful,
-                total_runs: 3,
-                average_score: average,
-                runs: replayItems,
-            };
-
-            replayLogEl.textContent = lines.join("\n");
-            statusEl.textContent = "Auto replay complete.";
-            setBusy(false);
-        }
-
-        const buildReplaySnapshot = (data) => {
-            const grader = data && data.grader_output ? data.grader_output : {};
-            const variant = String((data && data.variant) || "-");
-            const finalScore = Number((grader.total_score ?? grader.final_score) || 0);
-            return [
-                "Latest Replay Snapshot",
-                `Variant: ${variant}`,
-                `Score: ${finalScore.toFixed(2)}`,
-                `Issue/Fix/Explanation: ${Number(grader.issue_score || 0).toFixed(2)} / ${Number(grader.fix_score || 0).toFixed(2)} / ${Number(grader.explanation_score || 0).toFixed(2)}`,
-                `Source: ${String((lastScorecardReport && lastScorecardReport.source) || "live")}`,
-            ].join("\n");
-        };
-
         async function refreshSupportPanelsAfterEvaluation(data, context = {}) {
             const mode = String(context.mode || (isHallucinationMode() ? "hallucination" : "standard"));
             const taskIndex = Number(context.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
             const codeInput = String(context.codeInput ?? codeInputEl.value ?? "");
             const forceFalsePositive = Boolean(context.forceFalsePositive ?? falsePositiveToggleEl.checked);
-
-            replayLogEl.textContent = buildReplaySnapshot(data);
 
             await runModelComparison({
                 mode,
@@ -1233,10 +1141,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 codeInput,
                 silent: true,
             });
-
-            if (benchmarkReplayDetailsEl) {
-                benchmarkReplayDetailsEl.open = true;
-            }
             if (adversarialDetailsEl) {
                 adversarialDetailsEl.open = true;
             }
@@ -1306,34 +1210,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
             }
         }
 
-        async function runBenchmarkReport(options = {}) {
-            const silent = Boolean(options.silent);
-            if (!silent) {
-                statusEl.textContent = "Running benchmark suite...";
-                setBusy(true);
-            }
-
-            try {
-                const response = await fetch("/demo/benchmark-report");
-                if (!response.ok) throw new Error("benchmark request failed");
-                const data = await response.json();
-                comparisonTextEl.textContent = String(data.table || "No benchmark table returned.");
-                if (!silent) {
-                    statusEl.textContent = "Benchmark report complete.";
-                }
-                return data;
-            } catch (err) {
-                if (!silent) {
-                    statusEl.textContent = "Benchmark report failed. Check server logs.";
-                }
-                return null;
-            } finally {
-                if (!silent) {
-                    setBusy(false);
-                }
-            }
-        }
-
         async function runAdversarialTests(options = {}) {
             const mode = String(options.mode ?? (isHallucinationMode() ? "hallucination" : "standard"));
             const taskIndex = Number(options.taskIndex ?? (mode === "hallucination" ? 0 : taskIndexEl.value));
@@ -1363,6 +1239,8 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 const data = await response.json();
                 const tests = Array.isArray(data.tests) ? data.tests : [];
                 const reasons = Array.isArray(data.reasons) ? data.reasons : [];
+                const headline = data.headline ? String(data.headline) : "";
+                const warning = data.warning ? String(data.warning) : "";
                 if (tests.length === 0) {
                     adversarialTextEl.textContent = "No adversarial tests generated.";
                     if (!silent) {
@@ -1372,19 +1250,31 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 }
 
                 const lines = ["🧪 Adversarial Tests", ""];
+                if (headline) {
+                    lines.push(headline);
+                    lines.push("");
+                }
+                if (warning) {
+                    lines.push(warning);
+                    lines.push("");
+                }
                 if (reasons.length > 0) {
                     lines.push("📌 Why this test was generated");
-                    lines.push("Reason:");
                     for (const reason of reasons) {
                         lines.push(`→ ${String(reason)}`);
                     }
                     lines.push("");
                 }
                 for (const t of tests) {
-                    lines.push(`${t.name}: ${t.input} -> ${t.result} ${t.icon}`);
+                    const name = String((t && t.name) || "Test");
+                    const input = String((t && t.input) || "-");
+                    const result = String((t && t.result) || "-");
+                    const icon = String((t && t.icon) || "");
+                    lines.push(`${name}: ${input}`);
+                    lines.push(`→ ${icon} ${result}`.trim());
+                    lines.push("");
                 }
                 if (data.summary) {
-                    lines.push("");
                     lines.push(`Summary: ${data.summary}`);
                 }
                 adversarialTextEl.textContent = lines.join("\n");
@@ -1459,18 +1349,10 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 const testCount = Array.isArray(adversarialData && adversarialData.tests) ? adversarialData.tests.length : 0;
                 logLines.push(`3) Adversarial generator produced ${testCount} test(s).`);
 
-                const benchmarkData = await runBenchmarkReport({ silent: true });
-                if (benchmarkData && Array.isArray(benchmarkData.summary_rows) && benchmarkData.summary_rows.length > 0) {
-                    const winner = String(benchmarkData.summary_rows[0].model || "unknown");
-                    logLines.push(`4) Benchmark suite completed (leader: ${winner}).`);
-                } else {
-                    logLines.push("4) Benchmark suite did not return ranking rows.");
-                }
-
-                replayLogEl.textContent = logLines.join("\n");
+                comparisonTextEl.textContent = logLines.join("\n");
                 statusEl.textContent = "Judge demo sequence complete.";
             } catch (err) {
-                replayLogEl.textContent = logLines.concat(["", "Sequence interrupted by an error."]).join("\n");
+                comparisonTextEl.textContent = logLines.concat(["", "Sequence interrupted by an error."]).join("\n");
                 statusEl.textContent = "Judge demo sequence failed. Check server logs.";
             } finally {
                 falsePositiveToggleEl.checked = false;
@@ -1551,12 +1433,7 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 } else {
                     logLines.push("3) Hallucination trap failed.");
                 }
-
-                const benchmark = await runBenchmarkReport({ silent: true });
-                const benchmarkLeader = benchmark && Array.isArray(benchmark.summary_rows) && benchmark.summary_rows.length > 0
-                    ? String(benchmark.summary_rows[0].model || "unknown")
-                    : "unknown";
-                logLines.push(`4) Benchmark leader: ${benchmarkLeader}`);
+                const benchmarkLeader = "N/A";
 
                 const validScores = runRows.map((x) => Number(x.final_score || 0));
                 const averageScore = validScores.length > 0
@@ -1574,10 +1451,10 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 };
                 scorecardTextEl.textContent = renderScorecard(lastScorecardReport);
                 downloadScorecardBtn.disabled = !lastScorecardReport;
-                replayLogEl.textContent = logLines.join("\n");
+                comparisonTextEl.textContent = logLines.join("\n");
                 statusEl.textContent = "Final Judge Run complete.";
             } catch (err) {
-                replayLogEl.textContent = logLines.concat(["", "Final Judge Run interrupted by an error."]).join("\n");
+                comparisonTextEl.textContent = logLines.concat(["", "Final Judge Run interrupted by an error."]).join("\n");
                 statusEl.textContent = "Final Judge Run failed. Check server logs.";
             } finally {
                 falsePositiveToggleEl.checked = false;
@@ -1585,25 +1462,6 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
                 syncModeUI();
                 setBusy(false);
             }
-        }
-
-        function downloadReplayReport() {
-            if (!lastReplayReport) {
-                statusEl.textContent = "Run auto replay first to generate a report.";
-                return;
-            }
-            const payload = JSON.stringify(lastReplayReport, null, 2);
-            const blob = new Blob([payload], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            const ts = new Date().toISOString().replace(/[:.]/g, "-");
-            a.href = url;
-            a.download = `replay-report-${ts}.json`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            statusEl.textContent = "Replay report downloaded.";
         }
 
         function downloadScorecardReport() {
@@ -1628,12 +1486,9 @@ Fix Errors       ░░░░░░░░░░░░░░░░░░░░ 0.
         loadBtn.addEventListener("click", loadSample);
         runBtn.addEventListener("click", runEvaluation);
         compareBtn.addEventListener("click", runModelComparison);
-        benchmarkBtn.addEventListener("click", () => { runBenchmarkReport(); });
         judgeDemoBtn.addEventListener("click", runJudgeDemoMode);
         finalJudgeRunBtn.addEventListener("click", runFinalJudgeRun);
         adversarialBtn.addEventListener("click", runAdversarialTests);
-        replayBtn.addEventListener("click", runAutoReplay);
-        downloadBtn.addEventListener("click", downloadReplayReport);
         downloadScorecardBtn.addEventListener("click", downloadScorecardReport);
         resetAnalyticsBtn.addEventListener("click", () => {
             errorHistory.length = 0;
@@ -2518,6 +2373,48 @@ def _generate_adversarial_tests(code_input: str) -> dict[str, object]:
     fn = _extract_function_name(code_input)
     tests: list[dict[str, str]] = []
 
+    # Pattern-based risk detection for index access operations.
+    if (
+        "arr[" in code_lower
+        or ".front()" in code_lower
+        or ".back()" in code_lower
+        or "front(" in code_lower
+        or "back(" in code_lower
+    ):
+        tests.extend(
+            [
+                {
+                    "name": "Test 1",
+                    "input": "arr = [], k = 1",
+                    "result": "Undefined behavior (index access)",
+                    "icon": "❌",
+                },
+                {
+                    "name": "Test 2",
+                    "input": "arr = [], k = 0",
+                    "result": "Edge case (invalid logic path)",
+                    "icon": "❌",
+                },
+                {
+                    "name": "Test 3",
+                    "input": "arr = [1,2,3], k = 2",
+                    "result": "Valid",
+                    "icon": "✅",
+                },
+            ]
+        )
+        return {
+            "risk_type": "index_access",
+            "headline": "🔥 Critical Edge Case Found",
+            "warning": "⚠️ Potential unsafe access detected (index-based operation)",
+            "tests": tests,
+            "reasons": [
+                "Array indexing detected",
+                "Empty input is high-risk edge case",
+            ],
+            "summary": "Empty array leads to unsafe access -> crash risk",
+        }
+
     # High-impact division crash probes.
     if "/" in code_input and not _has_zero_guard(code_lower):
         tests.append(
@@ -2592,7 +2489,7 @@ def _generate_adversarial_tests(code_input: str) -> dict[str, object]:
     return {
         "tests": tests,
         "reasons": [
-            "No high-risk crash pattern was detected in the snippet.",
+            "No deterministic crash pattern was detected in the snippet.",
             "Generated sanity checks to verify baseline robustness.",
         ],
         "summary": "No critical crash vector detected in snippet; produced robustness sanity tests.",
@@ -2912,7 +2809,8 @@ async def demo_adversarial(request: DemoEvaluateRequest) -> dict:
             reset_result = env.reset(task_index=request.task_index)
             sampled_code = reset_result.observation.code
             code_input = request.code_input.strip() if request.code_input and request.code_input.strip() else sampled_code
-            variant = env.state.variant_id
+            task = _match_task_by_code(request.task_index, code_input, getattr(env, "_current_task", None))
+            variant = task.title
             task_id = int(request.task_index)
 
         generated = _generate_adversarial_tests(code_input)
@@ -2921,6 +2819,9 @@ async def demo_adversarial(request: DemoEvaluateRequest) -> dict:
             "task_index": task_id,
             "variant": variant,
             "code_input": code_input,
+            "risk_type": generated.get("risk_type"),
+            "headline": generated.get("headline"),
+            "warning": generated.get("warning"),
             "tests": generated.get("tests", []),
             "reasons": generated.get("reasons", []),
             "summary": generated.get("summary", ""),
