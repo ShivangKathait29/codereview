@@ -11,6 +11,7 @@ Grading is fully deterministic — no LLM in the loop.
 
 from __future__ import annotations
 
+import json
 import random
 import re
 from dataclasses import dataclass
@@ -278,6 +279,217 @@ def _strict_unit(x: float, eps: float = 0.01) -> float:
     return min(1.0 - eps, max(eps, x))
 
 
+def _extract_review_fields(review: str) -> tuple[str, str, str]:
+    """Extract issue/fix/explanation fields from JSON or sectioned text."""
+    try:
+        parsed = json.loads(review)
+        if isinstance(parsed, dict):
+            issue = _normalize(str(parsed.get("issue", "")))
+            fix = _normalize(str(parsed.get("fix", "")))
+            explanation = _normalize(str(parsed.get("explanation", "")))
+            if issue or fix or explanation:
+                return issue, fix, explanation
+    except Exception:
+        pass
+
+    issue_match = re.search(r"issue:\s*(.*?)(?:\nfix:|$)", review, flags=re.IGNORECASE | re.DOTALL)
+    fix_match = re.search(r"fix:\s*(.*?)(?:\nexplanation:|$)", review, flags=re.IGNORECASE | re.DOTALL)
+    explanation_match = re.search(r"explanation:\s*(.*)$", review, flags=re.IGNORECASE | re.DOTALL)
+
+    issue = _normalize(issue_match.group(1)) if issue_match else ""
+    fix = _normalize(fix_match.group(1)) if fix_match else ""
+    explanation = _normalize(explanation_match.group(1)) if explanation_match else ""
+    return issue, fix, explanation
+
+
+def _matches_any(text: str, keywords: list[str]) -> bool:
+    text_norm = _normalize(text)
+    return any(_normalize(kw) in text_norm for kw in keywords)
+
+
+def _collect_rule_keywords(task: Task, name_fragments: tuple[str, ...]) -> list[str]:
+    collected: list[str] = []
+    for rule in task.scoring_rules:
+        rule_name = rule.name.lower()
+        if any(fragment in rule_name for fragment in name_fragments):
+            collected.extend(rule.keywords)
+    return collected
+
+
+def _is_no_issue_task(task: Task) -> bool:
+    no_issue_markers = [
+        "no bug",
+        "no issue",
+        "safe",
+        "already checked",
+        "no division by zero",
+        "correct",
+    ]
+    expected = " ".join(_normalize(item) for item in task.expected_issues)
+    return any(marker in expected for marker in no_issue_markers)
+
+
+def _is_none_issue_text(issue_text: str) -> bool:
+    markers = ["none", "no issue", "no bug", "already checked", "safe", "correct"]
+    return any(marker in _normalize(issue_text) for marker in markers)
+
+
+EXPECTED: dict[str, list[str]] = {
+    "iseven_bug": [
+        "wrong logic",
+        "incorrect condition",
+        "returns true for odd",
+        "parity error",
+    ],
+    "division by zero": [
+        "divide by zero",
+        "div by zero",
+        "count is zero",
+        "count == 0",
+    ],
+    "out-of-bounds access": [
+        "out of bounds",
+        "oob",
+        "boundary error",
+        "arr[i+1]",
+    ],
+    "integer overflow": [
+        "overflow",
+        "wrap around",
+        "int total",
+        "truncation",
+    ],
+    "none": [
+        "none",
+        "no issue",
+        "no bug",
+        "safe",
+        "already checked",
+    ],
+}
+
+
+def _expand_expected_issues(expected_issues: list[str]) -> list[str]:
+    """Expand expected issue labels into semantic aliases."""
+    expanded: list[str] = []
+    for issue in expected_issues:
+        key = str(issue).lower().strip()
+        if not key:
+            continue
+        expanded.append(key)
+
+        if key in EXPECTED:
+            expanded.extend(EXPECTED[key])
+
+        for canonical, aliases in EXPECTED.items():
+            if canonical.lower() in key:
+                expanded.extend(aliases)
+
+    # de-duplicate while preserving order
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in expanded:
+        norm = str(item).lower().strip()
+        if norm and norm not in seen:
+            deduped.append(norm)
+            seen.add(norm)
+    return deduped
+
+
+def run_tests_isEven() -> list[tuple[int, bool, bool]]:
+    """Adversarial tests for a known parity bug implementation."""
+    def isEven(n: int) -> bool:
+        if n % 2 == 1:
+            return True
+        return False
+
+    cases = [2, 3]
+    return [(n, isEven(n), (n % 2 == 0)) for n in cases]
+
+
+def _detect_adversarial_issue_from_code(code: str) -> tuple[Optional[str], list[str]]:
+    """Detect known bug patterns and return failed adversarial cases."""
+    code_norm = _normalize(code)
+    failures: list[str] = []
+
+    # Known parity bug profile: function returns True for odd numbers.
+    if (
+        "iseven" in code_norm
+        and "% 2 == 1" in code_norm
+        and "return true" in code_norm
+    ):
+        for n, actual, expected in run_tests_isEven():
+            if actual != expected:
+                failures.append(f"input={n}, expected={expected}, actual={actual}")
+        if failures:
+            return "iseven_bug", failures
+
+    return None, failures
+
+
+def detect_hallucination(review_issue: str, expected_issues: list[str]) -> bool:
+    """Explicit pre-check for hallucinated issue claims."""
+    review_issue = review_issue.lower().strip()
+    normalized_expected = _expand_expected_issues(expected_issues)
+    none_expected = normalized_expected == ["none"]
+    if none_expected:
+        normalized_expected = _expand_expected_issues(["none"])
+
+    # simple semantic match
+    matched = any(keyword in review_issue for keyword in normalized_expected)
+
+    if not matched and not none_expected:
+        return True
+
+    if none_expected and review_issue not in _expand_expected_issues(["none"]):
+        return True
+
+    return False
+
+
+def is_fix_relevant(issue: str, fix: str) -> bool:
+    """Check whether the proposed fix is relevant to the identified issue."""
+    issue = issue.lower().strip()
+    fix = fix.lower().strip()
+
+    # Crude but effective relevance checks.
+    if "overflow" in issue and "long long" in fix:
+        return True
+    if "even" in issue and "% 2 == 0" in fix:
+        return True
+
+    # Existing task-family relevance checks.
+    if (
+        "division by zero" in issue
+        or ("count" in issue and "zero" in issue)
+    ) and any(token in fix for token in ["count == 0", "if(count", "if (count", "guard", "validate", "check"]):
+        return True
+
+    if (
+        "out-of-bounds" in issue
+        or "out of bounds" in issue
+        or "arr[i+1]" in issue
+        or "boundary" in issue
+    ) and any(token in fix for token in ["i + 1 < arr.size()", "arr.size() - 1", "bound", "index"]):
+        return True
+
+    if (
+        "empty" in issue
+        or "arr.front" in issue
+        or "arr.back" in issue
+    ) and any(token in fix for token in ["arr.empty()", "if(arr.empty())", "if (arr.empty())", "size() == 0"]):
+        return True
+
+    if (
+        "pass by value" in issue
+        or "copy" in issue
+        or "overhead" in issue
+    ) and any(token in fix for token in ["const vector<int>&", "const reference", "reference"]):
+        return True
+
+    return False
+
+
 def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dict[str, float]]:
     """
     Grade a code review deterministically.
@@ -286,70 +498,134 @@ def deterministic_grade_review(review: str, task: Task) -> tuple[float, str, dic
         (reward, feedback, info_dict) where reward ∈ (0.0, 1.0)
     """
     normalized = _normalize(review)
-    breakdown: list[str] = []
-    raw_score = 0.0
     issue_score = 0.0
     fix_score = 0.0
     explanation_score = 0.0
 
-    # --- Rubric scoring -------------------------------------------------------
-    for rule in task.scoring_rules:
-        matched = any(kw in normalized for kw in rule.keywords)
-        if matched:
-            raw_score += rule.weight
-            breakdown.append(f"  ✓ {rule.name}: +{rule.weight:.1f}")
-            rule_name = rule.name.lower()
-            if "fix" in rule_name or "optimization" in rule_name:
-                fix_score += rule.weight
-            elif "explanation" in rule_name or "complexity" in rule_name or "edge" in rule_name:
-                explanation_score += rule.weight
-            else:
-                issue_score += rule.weight
+    issue_text, fix_text, explanation_text = _extract_review_fields(review)
+    issue_source = issue_text or normalized
+    fix_source = fix_text or normalized
+    explanation_source = explanation_text or normalized
+
+    no_issue_task = _is_no_issue_task(task)
+    hallucination = False
+    adversarial_penalty = 0.0
+
+    adversarial_issue, adversarial_failures = _detect_adversarial_issue_from_code(task.code)
+
+    expected_for_hallucination = ["none"] if no_issue_task else list(task.expected_issues)
+    if adversarial_issue and not no_issue_task:
+        expected_for_hallucination = expected_for_hallucination + [adversarial_issue]
+    if detect_hallucination(issue_source, expected_for_hallucination):
+        adversarial_miss = bool(adversarial_issue and adversarial_failures)
+        miss_line = "\nPenalty: missed adversarially validated bug." if adversarial_miss else ""
+        reward = _strict_unit(0.0)
+        feedback = (
+            f"Task: {task.title} ({task.difficulty})\n"
+            "Hallucinated issue detected\n"
+            "Issue Identification: 0.00/0.50\n"
+            "Fix Quality: 0.00/0.30\n"
+            "Explanation Quality: 0.00/0.20\n"
+            "Total score: 0.00"
+            f"{miss_line}"
+        )
+        info = {
+            "issue": 0.0,
+            "fix": 0.0,
+            "explanation": 0.0,
+            "feedback": 0.0,
+            "issue_score": 0.0,
+            "fix_score": 0.0,
+            "explanation_score": 0.0,
+            "penalties": 0.0,
+            "bonus": 0.0,
+            "total_score": 0.0,
+            "total": 0.0,
+            "adversarial_penalty": 0.2 if adversarial_miss else 0.0,
+        }
+        return reward, feedback, info
+
+    issue_keywords = task.expected_issues + _collect_rule_keywords(task, ("issue", "bug", "inefficiency", "detect"))
+    fix_keywords = _collect_rule_keywords(task, ("fix", "optimization", "correct"))
+    explanation_keywords = _collect_rule_keywords(task, ("explanation", "complexity", "edge"))
+
+    if no_issue_task:
+        issue_correct = _is_none_issue_text(issue_source)
+        hallucination = not issue_correct
+        issue_score = 0.5 if issue_correct else 0.0
+
+        no_fix_markers = ["no fix", "none", "already", "not needed", "no change"]
+        fix_correct = issue_correct and _matches_any(fix_source, no_fix_markers)
+        fix_score = 0.3 if fix_correct else 0.0
+
+        safe_reason_markers = ["safe", "handled", "already checked", "guard", "no bug", "correct"]
+        explanation_correct = issue_correct and (
+            _matches_any(explanation_source, explanation_keywords)
+            or _matches_any(explanation_source, safe_reason_markers)
+        )
+        explanation_score = 0.2 if explanation_correct else 0.0
+    else:
+        issue_correct = _matches_any(issue_source, issue_keywords)
+        hallucination = not issue_correct
+        issue_score = 0.5 if issue_correct else 0.0
+
+        fix_relevant = is_fix_relevant(issue_source, fix_source)
+        fix_correct = issue_correct and fix_relevant and _matches_any(fix_source, fix_keywords)
+        fix_score = 0.3 if fix_correct else 0.0
+
+        explanation_correct = issue_correct and (
+            _matches_any(explanation_source, explanation_keywords)
+            or _matches_any(explanation_source, task.expected_issues)
+        )
+        explanation_score = 0.2 if explanation_correct else 0.0
+
+    adversarial_detected = False
+    if adversarial_issue and adversarial_failures:
+        adversarial_aliases = _expand_expected_issues([adversarial_issue])
+        adversarial_detected = any(alias in issue_source for alias in adversarial_aliases)
+        if adversarial_detected:
+            issue_score = 0.5
         else:
-            breakdown.append(f"  ✗ {rule.name}:  0.0  (missing)")
+            issue_score = 0.0
+            adversarial_penalty = 0.2
 
-    # --- Penalties ------------------------------------------------------------
-    penalties = 0.0
+    total_score = max(0.0, issue_score + fix_score + explanation_score - adversarial_penalty)
+    reward = _strict_unit(total_score)
 
-    # Very short review (< 30 chars)
-    if len(review.strip()) < 30:
-        penalties += 0.2
-        breakdown.append("  ⚠ Penalty: very short review → −0.2")
+    feedback_lines = [
+        f"Task: {task.title} ({task.difficulty})",
+        f"Issue Identification: {issue_score:.2f}/0.50",
+        f"Fix Quality: {fix_score:.2f}/0.30",
+        f"Explanation Quality: {explanation_score:.2f}/0.20",
+    ]
+    if hallucination:
+        feedback_lines.append("Hallucination detected: mentioned issue does not match code/task.")
+    if (not no_issue_task) and issue_score > 0.0 and fix_score == 0.0:
+        feedback_lines.append("Fix relevance check failed: fix does not directly address the identified issue.")
+    if adversarial_issue and adversarial_failures:
+        feedback_lines.append(f"Adversarial validation detected bug profile: {adversarial_issue}.")
+        if adversarial_detected:
+            feedback_lines.append("Adversarial check passed: review identified the validated bug.")
+        else:
+            feedback_lines.append("Penalty: missed adversarially validated bug.")
+    feedback_lines.append(f"Total score: {total_score:.2f}")
 
-    # Irrelevant / repetitive (naive heuristic: >50% repeated words)
-    words = normalized.split()
-    if words:
-        unique_ratio = len(set(words)) / len(words)
-        if unique_ratio < 0.4:
-            penalties += 0.2
-            breakdown.append("  ⚠ Penalty: repetitive text → −0.2")
-
-    # --- Bonus ----------------------------------------------------------------
-    bonus = 0.0
-
-    # Structured explanation ("Issue:", "Fix:", "Bug:", "Solution:")
-    structure_markers = ["issue:", "fix:", "bug:", "solution:", "problem:", "recommendation:"]
-    if any(marker in normalized for marker in structure_markers):
-        bonus += 0.1
-        breakdown.append("  ★ Bonus: structured explanation → +0.1")
-
-    # --- Final reward (clamped to strict open interval) ------------------------
-    reward = _strict_unit(max(0.0, min(1.0, raw_score - penalties + bonus)))
-    breakdown.insert(0, f"Task: {task.title} ({task.difficulty})")
-    breakdown.append(f"  ─────────────────────────────")
-    breakdown.append(f"  Raw: {raw_score:.2f}  Penalties: −{penalties:.2f}  Bonus: +{bonus:.2f}")
-    breakdown.append(f"  Final reward: {reward:.2f}")
-
-    feedback = "\n".join(breakdown)
+    feedback = "\n".join(feedback_lines)
     
     info = {
         "issue_score": issue_score,
         "fix_score": fix_score,
         "explanation_score": explanation_score,
-        "penalties": penalties,
-        "bonus": bonus,
-        "total": reward
+        "penalties": 0.0,
+        "bonus": 0.0,
+        "total_score": total_score,
+        "total": reward,
     }
+    info["adversarial_penalty"] = adversarial_penalty
+    info["issue"] = issue_score
+    info["fix"] = fix_score
+    info["explanation"] = explanation_score
+    info["feedback"] = 1.0
     return reward, feedback, info
 
 def is_malicious(review: str) -> bool:
@@ -373,6 +649,7 @@ def grade_review(review: str, task: Task) -> tuple[float, str, dict[str, float]]
             "explanation_score": 0.0,
             "penalties": 1.0,
             "bonus": 0.0,
+            "total_score": 0.0,
             "total": 0.01,
         }
 

@@ -1486,11 +1486,12 @@ def _match_task_by_code(task_index: int, code_input: str, fallback_task: Optiona
 def _score_standard_review(review: str, task: Task) -> dict[str, object]:
     """Score a review with deterministic standard-task rubric."""
     reward, feedback, info = deterministic_grade_review(review, task)
+    total_score = float(info.get("total_score", info.get("total", reward)))
     return {
         "issue_score": float(info.get("issue_score", 0.0)),
         "fix_score": float(info.get("fix_score", 0.0)),
         "explanation_score": float(info.get("explanation_score", 0.0)),
-        "final_score": float(reward),
+        "final_score": total_score,
         "feedback": feedback,
         "reason_items": _build_reason_items({k: float(v) for k, v in info.items()}),
     }
@@ -1992,6 +1993,7 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                     "issue_score": float(hallucination_scores["issue_score"]),
                     "fix_score": float(hallucination_scores["fix_score"]),
                     "explanation_score": float(hallucination_scores["explanation_score"]),
+                    "total_score": float(hallucination_scores["final_score"]),
                     "final_score": float(hallucination_scores["final_score"]),
                     "hallucination_detected": bool(hallucination_scores.get("hallucination_detected", False)),
                     "penalty_applied": float(hallucination_scores.get("penalty_applied", 0.0)),
@@ -2039,7 +2041,8 @@ async def demo_evaluate(request: DemoEvaluateRequest) -> dict:
                 "issue_score": float(info.get("issue_score", 0.0)),
                 "fix_score": float(info.get("fix_score", 0.0)),
                 "explanation_score": float(info.get("explanation_score", 0.0)),
-                "final_score": float(step_result.reward),
+                "total_score": float(info.get("total_score", info.get("total", 0.0))),
+                "final_score": float(info.get("total_score", info.get("total", step_result.reward))),
                 "hallucination_detected": False,
                 "penalty_applied": 0.0,
                 "reason_items": reason_items,
